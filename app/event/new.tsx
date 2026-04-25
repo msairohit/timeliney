@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, Pressable, Platform, KeyboardAvoidingView, Switch } from 'react-native';
-import { useRouter } from 'react-native-expo'; // Wait, should use expo-router
 import { useRouter as useExpoRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Calendar as CalendarIcon, MapPin, Tag, Clock } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { useEventStore } from '../../store/eventStore';
+import { useAuthStore } from '../../store/authStore';
 import { TAGS_LIST } from '../../constants/themes';
 import { TagId } from '../../types';
 import 'react-native-get-random-values';
@@ -26,6 +26,7 @@ export default function CreateEventScreen() {
   }>();
   const insets = useSafeAreaInsets();
   const { events, addEvent } = useEventStore();
+  const user = useAuthStore(state => state.user);
 
   const [title, setTitle] = useState(params.groupTitle || '');
   const [description, setDescription] = useState(params.description || '');
@@ -65,7 +66,7 @@ export default function CreateEventScreen() {
     const baseIndex = params.groupId ? existingInGroup.length + 1 : 1;
 
     const baseEvent = {
-      userId: 'local-user',
+      userId: user?.uid || 'local-user',
       title: title.trim(),
       description: description.trim(),
       place: place.trim(),
@@ -142,7 +143,7 @@ export default function CreateEventScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Pressable onPress={() => router.back()} style={styles.iconButton}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.iconButton}>
           <X size={24} color="#0f172a" />
         </Pressable>
         <Text style={styles.headerTitle}>New Event</Text>

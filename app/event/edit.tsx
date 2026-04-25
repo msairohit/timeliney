@@ -6,6 +6,7 @@ import { X, Calendar as CalendarIcon, MapPin, Tag, Clock } from 'lucide-react-na
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { useEventStore } from '../../store/eventStore';
+import { useAuthStore } from '../../store/authStore';
 import { TAGS_LIST } from '../../constants/themes';
 import { TagId } from '../../types';
 import Animated, { FadeInUp } from 'react-native-reanimated';
@@ -19,6 +20,7 @@ export default function EditEventScreen() {
   
   const getEventById = useEventStore((state) => state.getEventById);
   const updateEvent = useEventStore((state) => state.updateEvent);
+  const user = useAuthStore(state => state.user);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -30,7 +32,7 @@ export default function EditEventScreen() {
   const [selectedTags, setSelectedTags] = useState<TagId[]>([]);
   const [isDateUnknown, setIsDateUnknown] = useState(false);
   const [isTimeUnknown, setIsTimeUnknown] = useState(false);
-  const [localMediaUris, setLocalMediaUris] = useState<string[]>([]);
+  const [allMedia, setAllMedia] = useState<string[]>([]);
   const [documents, setDocuments] = useState<{ uri: string; name: string }[]>([]);
   const [groupId, setGroupId] = useState<string | undefined>(undefined);
   const [occurrenceIndex, setOccurrenceIndex] = useState<number | undefined>(undefined);
@@ -61,12 +63,32 @@ export default function EditEventScreen() {
         }
         
         setSelectedTags(event.tags);
-        setLocalMediaUris(event.localMediaUris || []);
+        
+        // Deduplicate Media: If a cloud URL exists for a local file, only show one entry
+        const combinedMedia = [...(event.localMediaUris || [])];
+        (event.mediaUrls || []).forEach(cloudUrl => {
+          const cloudName = cloudUrl.split('/').pop()?.split('?')[0];
+          // Check if any local URI matches this filename
+          const alreadyInLocal = combinedMedia.some(local => local.includes(cloudName || '___'));
+          if (!alreadyInLocal) combinedMedia.push(cloudUrl);
+        });
+        setAllMedia(combinedMedia);
         
         const docNames = event.documentNames || [];
-        const docUris = event.localDocumentUris || [];
-        const docs = docNames.map((name, i) => ({ name, uri: docUris[i] }));
-        setDocuments(docs);
+        const localDocUris = event.localDocumentUris || [];
+        const cloudDocUrls = event.documentUrls || [];
+        
+        // Combine and deduplicate documents
+        const syncedDocs = docNames.map((name, i) => {
+          const local = localDocUris[i];
+          const cloud = cloudDocUrls[i];
+          return {
+            name,
+            uri: local || cloud || ''
+          };
+        });
+
+        setDocuments(syncedDocs);
         setGroupId(event.groupId);
         setOccurrenceIndex(event.occurrenceIndex);
       }
@@ -97,9 +119,11 @@ export default function EditEventScreen() {
       eventTime: isTimeUnknown ? '' : eventTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isTimeUnknown,
       tags: selectedTags,
-      localMediaUris: localMediaUris,
+      localMediaUris: allMedia.filter(uri => !uri.startsWith('http')),
+      mediaUrls: allMedia.filter(uri => uri.startsWith('http')),
       documentNames: documents.map(d => d.name),
-      localDocumentUris: documents.map(d => d.uri),
+      localDocumentUris: documents.map(d => !d.uri.startsWith('http') ? d.uri : ''),
+      documentUrls: documents.map(d => d.uri.startsWith('http') ? d.uri : '').filter(u => u !== ''),
       groupId,
       occurrenceIndex,
       updatedAt: new Date().toISOString(),
@@ -117,7 +141,7 @@ export default function EditEventScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Pressable onPress={() => router.back()} style={styles.iconButton}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.iconButton}>
           <X size={24} color="#0f172a" />
         </Pressable>
         <Text style={styles.headerTitle}>Edit Event</Text>
@@ -282,7 +306,7 @@ export default function EditEventScreen() {
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(300)}>
-          <MediaPicker uris={localMediaUris} onUrisChange={setLocalMediaUris} />
+          <MediaPicker uris={allMedia} onUrisChange={setAllMedia} />
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(350)}>

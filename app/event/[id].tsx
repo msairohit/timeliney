@@ -20,10 +20,12 @@ import {
 import * as Sharing from 'expo-sharing';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Image as ExpoImage } from 'expo-image';
 import { Modal } from 'react-native';
 import { useEventStore } from '../../store/eventStore';
+import { useAuthStore } from '../../store/authStore';
 import { TAG_THEMES } from '../../constants/themes';
+import { SmartImage } from '../../components/common/SmartImage';
+import { getCachedFile } from '../../utils/cacheManager';
 import Animated, { 
   FadeInDown, 
   FadeInRight, 
@@ -56,20 +58,6 @@ export default function EventDetailScreen() {
       });
   }, [allEvents, event?.groupId]);
 
-  if (!event) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text>Event not found.</Text>
-        <Pressable onPress={() => router.back()} style={{ marginTop: 20 }}>
-          <Text style={{ color: '#0f172a', fontWeight: 'bold' }}>Go Back</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  const primaryTag = event.tags[0] ? TAG_THEMES[event.tags[0]] : TAG_THEMES.other;
-  const EventIcon = primaryTag.icon;
-
   const scrollHandler = useAnimatedScrollHandler((event) => {
     scrollY.value = event.contentOffset.y;
   });
@@ -98,6 +86,20 @@ export default function EventDetailScreen() {
       opacity: interpolate(scrollY.value, [0, 150], [1, 0]),
     };
   });
+
+  if (!event) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text>Event not found.</Text>
+        <Pressable onPress={() => router.back()} style={{ marginTop: 20 }}>
+          <Text style={{ color: '#0f172a', fontWeight: 'bold' }}>Go Back</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  const primaryTag = event.tags[0] ? TAG_THEMES[event.tags[0]] : TAG_THEMES.other;
+  const EventIcon = primaryTag.icon;
 
   const handleDelete = () => {
     Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
@@ -138,26 +140,32 @@ export default function EventDetailScreen() {
     }
   };
 
-  const handleOpenDocument = async (uri: string) => {
+  const handleOpenDocument = async (uri: string, name?: string) => {
     try {
+      // Ensure we have a local URI (either the provided one or a cached cloud one)
+      let finalUri = uri;
+      const accessToken = useAuthStore.getState().user?.accessToken;
+      
+      if (uri.startsWith('http') || !uri.includes('/')) {
+        finalUri = await getCachedFile(uri, name, accessToken);
+      }
+
       if (Platform.OS === 'android') {
         console.log('Phase 1: Attempting direct Open (Intent)...');
-        let contentUri = uri;
+        let contentUri = finalUri;
         
-        if (uri.startsWith('file://') || uri.startsWith('/')) {
-          // Try to get content URI
-          contentUri = await FileSystem.getContentUriAsync(uri);
+        if (finalUri.startsWith('file://') || finalUri.startsWith('/')) {
+          contentUri = await FileSystem.getContentUriAsync(finalUri);
         }
         
-        const mimeType = getMimeType(uri);
+        const mimeType = getMimeType(finalUri);
         await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
           data: contentUri,
           flags: 1 | 2 | 64, // READ | WRITE | PERSISTABLE
           type: mimeType,
         });
       } else {
-        // iOS: Quick Look preview is effectively an "Open"
-        await Sharing.shareAsync(uri);
+        await Sharing.shareAsync(finalUri);
       }
     } catch (error) {
       console.log('Phase 1 failed, attempting Phase 2 (Sharing)...', error);
@@ -169,7 +177,6 @@ export default function EventDetailScreen() {
             dialogTitle: 'Open Document' 
           });
         } else {
-          // Final fallback
           const WebBrowser = require('expo-web-browser');
           await WebBrowser.openBrowserAsync(uri);
         }
@@ -189,7 +196,7 @@ export default function EventDetailScreen() {
       {/* Animated Header */}
       <Animated.View style={[styles.header, headerStyle, { paddingTop: insets.top }]}>
         <View style={styles.headerContent}>
-          <Pressable onPress={() => router.back()} style={styles.headerButton}>
+          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.headerButton}>
             <ArrowLeft size={24} color="#1e293b" />
           </Pressable>
           
@@ -344,16 +351,23 @@ export default function EventDetailScreen() {
             <Animated.View entering={FadeInDown.duration(600).delay(600)} style={styles.section}>
               <Text style={styles.sectionTitle}>Media</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaContainer}>
-                {[...(event.localMediaUris || []), ...(event.mediaUrls || [])].map((uri, index) => (
-                  <Pressable key={uri + index} onPress={() => handleOpenImage(uri)}>
-                    <ExpoImage 
-                      source={{ uri }}
-                      style={styles.mediaImage}
-                      contentFit="cover"
-                      transition={200}
-                    />
-                  </Pressable>
-                ))}
+                {Array.from({ length: Math.max(event.localMediaUris?.length || 0, event.mediaUrls?.length || 0) }).map((_, index) => {
+                  const localUri = event.localMediaUris?.[index];
+                  const cloudUrl = event.mediaUrls?.[index];
+                  const key = (localUri || cloudUrl || '') + index;
+                  
+                  return (
+                    <Pressable key={key} onPress={() => handleOpenImage(localUri || cloudUrl || '')}>
+                      <SmartImage 
+                        localUri={localUri}
+                        cloudUrl={cloudUrl}
+                        style={styles.mediaImage}
+                        contentFit="cover"
+                        transition={200}
+                      />
+                    </Pressable>
+                  );
+                })}
               </ScrollView>
             </Animated.View>
           )}
@@ -369,7 +383,7 @@ export default function EventDetailScreen() {
                     <Pressable 
                       key={name + index} 
                       style={[styles.docItem, { borderColor: primaryTag.cardBorder }]}
-                      onPress={() => uri && handleOpenDocument(uri)}
+                      onPress={() => uri && handleOpenDocument(uri, name)}
                     >
                       <View style={[styles.docIconWrapper, { backgroundColor: primaryTag.badgeBackground }]}>
                         <FileText size={20} color={primaryTag.primary} />
@@ -407,8 +421,9 @@ export default function EventDetailScreen() {
             <X size={28} color="#fff" />
           </Pressable>
           {selectedImage && (
-            <ExpoImage
-              source={{ uri: selectedImage }}
+            <SmartImage
+              localUri={selectedImage.startsWith('http') ? undefined : selectedImage}
+              cloudUrl={selectedImage.startsWith('http') ? selectedImage : undefined}
               style={styles.fullImage}
               contentFit="contain"
             />
