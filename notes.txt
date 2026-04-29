@@ -8,11 +8,14 @@ option to select which color to which tag.
 add option for reminders.
 
 2.are we storing all the info under user specific? both in local and in frebase
-4. save and fetch all the info locally as well before storing or getting to / from firebase. so that the impact is less for DB.
-informative and attractive home screen with may be one card as this event last n years ago or smt.
+(done)4. save and fetch all the info locally as well before storing or getting to / from firebase. so that the impact is less for DB.
+(done)informative and attractive home screen with may be one card as this event last n years ago or smt.
 
 npx expo prebuild (to generate the native android and ios code. not eject, still can use expo related stuff but can be used to build the apps locally.)
 npx expo run:android --variant debug (connect the mobile to laptop and run this cmd to build the app, generate the apk and install to the mobile with hot reload, connceted to dev server.)
 npx expo run:android --variant release (same as above but does not connect to metro and hence no need to run the server and no hot reloading.)
 expo start -d (if we just want to run the app on mobile. if not installed any new packages then this cmd is enough no need for above cmd.) 
 npx expo start -c
+
+(done)make sub folders based on event name and store the media so that it will be easy.
+ 

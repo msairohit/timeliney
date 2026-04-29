@@ -3,8 +3,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useEventStore } from '../store/eventStore';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useState } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
+import LoadingScreen from '../components/LoadingScreen';
+
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const { user, setLoading, isLoading } = useAuthStore();
@@ -18,11 +23,23 @@ export default function RootLayout() {
 
   useEffect(() => {
     // Initial fetch of events if user is already logged in
-    if (user) {
+    if (user?.uid) {
+      // Security/Isolation check: If local events exist but belong to a different user, clear them first
+      const currentEvents = useEventStore.getState().events;
+      if (currentEvents.length > 0 && currentEvents[0].userId !== user.uid) {
+        console.log('Clearing mismatched local events for new user session');
+        useEventStore.getState().clearEvents();
+      }
+      
       useEventStore.getState().fetchEvents(user.uid);
     }
-    setLoading(false);
-  }, [user]);
+    
+    // Once we have the user state (either logged in or null), we can hide the splash screen
+    if (isMounted) {
+      setLoading(false);
+      SplashScreen.hideAsync();
+    }
+  }, [user?.uid, isMounted]);
 
   useEffect(() => {
     if (!isMounted || isLoading) return;
@@ -34,7 +51,7 @@ export default function RootLayout() {
       router.replace('/(auth)/login');
     } else if (user && inAuthGroup) {
       // Redirect to home if authenticated and trying to access auth screens
-      router.replace('/(tabs)');
+      router.replace('/');
     }
   }, [user, segments, isLoading, isMounted]);
 
@@ -47,15 +64,13 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: '#f8fafc' },
         }}
       >
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="index" />
+        <Stack.Screen name="timeline" />
+        <Stack.Screen name="profile" />
         <Stack.Screen name="event/new" options={{ presentation: 'modal' }} />
         <Stack.Screen name="event/[id]" />
       </Stack>
-      {isLoading && (
-        <View style={{ ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8fafc', zIndex: 1000 }}>
-          <ActivityIndicator size="large" color="#6366f1" />
-        </View>
-      )}
+      {isLoading && <LoadingScreen />}
     </>
   );
 }

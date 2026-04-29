@@ -1,15 +1,17 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
-import { useAuthStore } from '../../store/authStore';
-import { auth } from '../../constants/FirebaseConfig';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Pressable, Image } from 'react-native';
+import { useAuthStore } from '../store/authStore';
+import { auth } from '../constants/FirebaseConfig';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'expo-router';
-import { User, Mail, LogOut, Shield, Bell, CircleHelp as HelpCircle, ChevronRight } from 'lucide-react-native';
+import { User, Mail, LogOut, Shield, Bell, CircleHelp as HelpCircle, ChevronRight, ArrowLeft } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
   const { user, logout } = useAuthStore();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -21,8 +23,13 @@ export default function ProfileScreen() {
           try {
             await signOut(auth);
             logout();
+            // Clear local event store on logout for security and multi-user isolation
+            const { useEventStore } = await import('../store/eventStore');
+            useEventStore.getState().clearEvents();
+            
             router.replace('/(auth)/login');
           } catch (error) {
+            console.error('Logout error:', error);
             Alert.alert('Error', 'Failed to logout');
           }
         }
@@ -47,26 +54,29 @@ export default function ProfileScreen() {
     <ScrollView style={styles.container}>
       <LinearGradient
         colors={['#6366f1', '#a855f7']}
-        style={styles.header}
+        style={[styles.header, { paddingTop: insets.top + 20 }]}
       >
+        <Pressable 
+          onPress={() => router.back()} 
+          style={styles.backButton}
+        >
+          <ArrowLeft color="#fff" size={24} />
+        </Pressable>
         <View style={styles.avatarContainer}>
-          <User size={40} color="#fff" />
+          {user?.photo ? (
+            <Image source={{ uri: user.photo }} style={styles.avatar} />
+          ) : (
+            <User size={40} color="#fff" />
+          )}
         </View>
-        <Text style={styles.userName}>{user?.username || 'User'}</Text>
+        <Text style={styles.userName}>{user?.displayName || user?.username || 'User'}</Text>
         <Text style={styles.userEmail}>{user?.email || 'No email'}</Text>
       </LinearGradient>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account Settings</Text>
-        <ProfileItem icon={User} label="Username" value={user?.username} />
+        <ProfileItem icon={User} label="Username" value={user?.displayName || user?.username} />
         <ProfileItem icon={Mail} label="Email Address" value={user?.email} />
-        <ProfileItem icon={Shield} label="Security" onPress={() => {}} />
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Preferences</Text>
-        <ProfileItem icon={Bell} label="Notifications" onPress={() => {}} />
-        <ProfileItem icon={HelpCircle} label="Help & Support" onPress={() => {}} />
       </View>
 
       <View style={styles.section}>
@@ -89,20 +99,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
   },
   header: {
-    paddingTop: 80,
     paddingBottom: 40,
     alignItems: 'center',
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
+    position: 'relative',
+  },
+  backButton: {
+    position: 'absolute',
+    left: 20,
+    top: 20,
+    zIndex: 10,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   avatarContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
+    overflow: 'hidden',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  avatar: {
+    width: '100%',
+    height: '100%',
   },
   userName: {
     fontSize: 24,

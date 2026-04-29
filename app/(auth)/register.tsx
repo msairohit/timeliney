@@ -65,7 +65,7 @@ export default function RegisterScreen() {
       });
 
       Alert.alert('Success', 'Account created successfully!');
-      router.replace('/(tabs)');
+      router.replace('/');
     } catch (error: any) {
       console.error(error);
       Alert.alert('Registration Failed', error.message);

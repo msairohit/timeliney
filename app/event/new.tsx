@@ -25,14 +25,27 @@ export default function CreateEventScreen() {
     description?: string;
   }>();
   const insets = useSafeAreaInsets();
-  const { events, addEvent } = useEventStore();
+  const addEvent = useEventStore(state => state.addEvent);
   const user = useAuthStore(state => state.user);
 
+  const allEvents = useEventStore(state => state.events);
   const [title, setTitle] = useState(params.groupTitle || '');
   const [description, setDescription] = useState(params.description || '');
   const [place, setPlace] = useState(params.place || '');
   const [eventDate, setEventDate] = useState(new Date());
-  const [eventTime, setEventTime] = useState(new Date());
+  const [eventTime, setEventTime] = useState(() => {
+    const d = new Date();
+    d.setSeconds(0, 0, 0);
+    return d;
+  });
+
+  const pickerDateValue = React.useMemo(() => {
+    return (eventDate instanceof Date && !isNaN(eventDate.getTime())) ? eventDate : new Date();
+  }, [eventDate]);
+
+  const pickerTimeValue = React.useMemo(() => {
+    return (eventTime instanceof Date && !isNaN(eventTime.getTime())) ? eventTime : new Date();
+  }, [eventTime]);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [selectedTags, setSelectedTags] = useState<TagId[]>(
@@ -40,7 +53,7 @@ export default function CreateEventScreen() {
   );
   const [isDateUnknown, setIsDateUnknown] = useState(false);
   const [isTimeUnknown, setIsTimeUnknown] = useState(false);
-  const [localMediaUris, setLocalMediaUris] = useState<string[]>([]);
+  const [allMedia, setAllMedia] = useState<{ uri: string; name: string }[]>([]);
   const [documents, setDocuments] = useState<{ uri: string; name: string }[]>([]);
   
   // Multiple occurrences state
@@ -48,6 +61,19 @@ export default function CreateEventScreen() {
   const [additionalDates, setAdditionalDates] = useState<Date[]>([]);
   const [showAdditionalDatePicker, setShowAdditionalDatePicker] = useState(false);
   const [editingDateIndex, setEditingDateIndex] = useState<number | null>(null);
+
+  // Calculate next index for the group
+  const existingInGroup = React.useMemo(() => 
+    params.groupId ? allEvents.filter(e => e.groupId === params.groupId) : [],
+    [allEvents, params.groupId]
+  );
+  
+  const nextIndex = React.useMemo(() => 
+    params.groupId 
+      ? (Math.max(...existingInGroup.map(e => e.occurrenceIndex || 0), 0) + 1)
+      : 1,
+    [existingInGroup, params.groupId]
+  );
 
   const toggleTag = (id: TagId) => {
     setSelectedTags(prev => 
@@ -62,8 +88,9 @@ export default function CreateEventScreen() {
     }
 
     const finalGroupId = params.groupId || (isRecurring ? uuidv4() : undefined);
-    const existingInGroup = params.groupId ? events.filter(e => e.groupId === params.groupId) : [];
-    const baseIndex = params.groupId ? existingInGroup.length + 1 : 1;
+    const baseIndex = nextIndex;
+
+    const isLocal = (uri: string) => uri.startsWith('file://') || uri.startsWith('content://') || uri.startsWith('/');
 
     const baseEvent = {
       userId: user?.uid || 'local-user',
@@ -71,14 +98,17 @@ export default function CreateEventScreen() {
       description: description.trim(),
       place: place.trim(),
       isDateUnknown,
-      eventTime: isTimeUnknown ? '' : eventTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      eventTime: isTimeUnknown ? '' : format(eventTime, 'hh:mm a'),
       isTimeUnknown,
       tags: selectedTags,
-      mediaUrls: [],
-      localMediaUris: localMediaUris,
-      documentUrls: [],
+      mediaUrls: allMedia.filter(m => !isLocal(m.uri)).map(m => m.uri),
+      mediaNames: allMedia.filter(m => !isLocal(m.uri)).map(m => m.name),
+      localMediaUris: allMedia.filter(m => isLocal(m.uri)).map(m => m.uri),
+      localMediaNames: allMedia.filter(m => isLocal(m.uri)).map(m => m.name),
+      documentUrls: documents.filter(d => !isLocal(d.uri)).map(d => d.uri),
       documentNames: documents.map(d => d.name),
-      localDocumentUris: documents.map(d => d.uri),
+      localDocumentUris: documents.filter(d => isLocal(d.uri)).map(d => d.uri),
+      localDocumentNames: documents.filter(d => isLocal(d.uri)).map(d => d.name),
       customFields: {},
       syncStatus: 'local' as const,
       groupId: finalGroupId,
@@ -91,7 +121,7 @@ export default function CreateEventScreen() {
         ...baseEvent,
         id: uuidv4(),
         eventDate: isDateUnknown ? '' : format(eventDate, 'yyyy-MM-dd'),
-        occurrenceIndex: baseIndex,
+        occurrenceIndex: 0, // Will be reordered
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -103,7 +133,7 @@ export default function CreateEventScreen() {
           ...baseEvent,
           id: uuidv4(),
           eventDate: format(date, 'yyyy-MM-dd'),
-          occurrenceIndex: baseIndex + index + 1,
+          occurrenceIndex: 0, // Will be reordered
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
@@ -118,6 +148,15 @@ export default function CreateEventScreen() {
         updatedAt: new Date().toISOString(),
       };
       addEvent(newEvent as any);
+    }
+
+    // Trigger sync and reorder if needed
+    if (finalGroupId) {
+      useEventStore.getState().reorderGroupEvents(finalGroupId);
+    }
+
+    if (user && user.uid) {
+      useEventStore.getState().syncEvents(user.uid);
     }
 
     router.back();
@@ -143,7 +182,7 @@ export default function CreateEventScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.iconButton}>
+        <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.iconButton}>
           <X size={24} color="#0f172a" />
         </Pressable>
         <Text style={styles.headerTitle}>New Event</Text>
@@ -171,7 +210,7 @@ export default function CreateEventScreen() {
             </View>
             {Platform.OS === 'ios' ? (
               <DateTimePicker
-                value={eventDate}
+                value={pickerDateValue}
                 mode="date"
                 display="compact"
                 onChange={(event, date) => date && setEventDate(date)}
@@ -183,19 +222,8 @@ export default function CreateEventScreen() {
                 onPress={() => !isDateUnknown && setShowDatePicker(true)} 
                 style={[styles.dateInputWrapper, isDateUnknown && { opacity: 0.3 }]}
               >
-                <Text style={styles.dateText}>{eventDate.toLocaleDateString()}</Text>
+                <Text style={styles.dateText}>{format(eventDate, 'PPP')}</Text>
               </Pressable>
-            )}
-            {showDatePicker && Platform.OS === 'android' && (
-              <DateTimePicker
-                value={eventDate}
-                mode="date"
-                display="default"
-                onChange={(event, date) => {
-                  setShowDatePicker(false);
-                  if (event.type === 'set' && date) setEventDate(date);
-                }}
-              />
             )}
           </View>
           <View style={styles.unknownToggle}>
@@ -216,10 +244,15 @@ export default function CreateEventScreen() {
             </View>
             {Platform.OS === 'ios' ? (
               <DateTimePicker
-                value={eventTime}
+                value={pickerTimeValue}
                 mode="time"
                 display="compact"
-                onChange={(event, date) => date && setEventTime(date)}
+                onChange={(event, date) => {
+                  if (date) {
+                    date.setSeconds(0, 0, 0);
+                    setEventTime(date);
+                  }
+                }}
                 style={[styles.datePickerIos, isTimeUnknown && { opacity: 0.3 }]}
                 disabled={isTimeUnknown}
               />
@@ -228,19 +261,8 @@ export default function CreateEventScreen() {
                 onPress={() => !isTimeUnknown && setShowTimePicker(true)} 
                 style={[styles.dateInputWrapper, isTimeUnknown && { opacity: 0.3 }]}
               >
-                <Text style={styles.dateText}>{eventTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
+                <Text style={styles.dateText}>{format(eventTime, 'hh:mm a')}</Text>
               </Pressable>
-            )}
-            {showTimePicker && Platform.OS === 'android' && (
-              <DateTimePicker
-                value={eventTime}
-                mode="time"
-                display="default"
-                onChange={(event, date) => {
-                  setShowTimePicker(false);
-                  if (event.type === 'set' && date) setEventTime(date);
-                }}
-              />
             )}
           </View>
           <View style={styles.unknownToggle}>
@@ -275,12 +297,12 @@ export default function CreateEventScreen() {
           {(isRecurring || params.groupId) && (
             <View style={styles.occurrencesList}>
               <Text style={styles.occurrenceLabel}>
-                {params.groupId ? 'New Occurrence' : 'Occurrence 1'}: {eventDate.toLocaleDateString()}
+                Occurrence {nextIndex}: {eventDate.toLocaleDateString()}
               </Text>
               
               {additionalDates.map((date, index) => (
                 <View key={index} style={styles.occurrenceItem}>
-                  <Text style={styles.occurrenceLabel}>Occurrence {params.groupId ? index + 2 : index + 2}:</Text>
+                  <Text style={styles.occurrenceLabel}>Occurrence {nextIndex + index + 1}:</Text>
                   {Platform.OS === 'ios' ? (
                     <DateTimePicker
                       value={date}
@@ -380,7 +402,7 @@ export default function CreateEventScreen() {
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(300)}>
-          <MediaPicker uris={localMediaUris} onUrisChange={setLocalMediaUris} />
+          <MediaPicker media={allMedia} onMediaChange={setAllMedia} />
         </Animated.View>
 
         <Animated.View entering={FadeInUp.delay(350)}>
@@ -390,6 +412,35 @@ export default function CreateEventScreen() {
           />
         </Animated.View>
       </ScrollView>
+
+      {/* Android Pickers (Outside ScrollView for stability) */}
+      {showDatePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={pickerDateValue}
+          mode="date"
+          display="default"
+          onChange={(event, date) => {
+            setShowDatePicker(false);
+            if (event.type === 'set' && date) {
+              setEventDate(date);
+            }
+          }}
+        />
+      )}
+      {showTimePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={pickerTimeValue}
+          mode="time"
+          display="default"
+          onChange={(event, date) => {
+            setShowTimePicker(false);
+            if (event.type === 'set' && date) {
+              date.setSeconds(0, 0, 0);
+              setEventTime(date);
+            }
+          }}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 }

@@ -49,7 +49,7 @@ export default function LoginScreen() {
           email: email.trim(),
           username: userData.username,
         });
-        router.replace('/(tabs)');
+        router.replace('/');
       } else {
         Alert.alert('Error', 'User profile not found');
       }

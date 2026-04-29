@@ -14,11 +14,14 @@ export interface LifeEvent {
   isTimeUnknown?: boolean;
   place?: string;
   tags: TagId[];
-  mediaUrls: string[];         // Firebase Storage URLs (Future)
+  mediaUrls: string[];         // Cloud file IDs
+  mediaNames: string[];        // Names of files on cloud
   localMediaUris: string[];    // Device cache URIs
-  documentUrls: string[];      // Firebase Storage URLs (Future)
+  localMediaNames?: string[];  // Names for local media
+  documentUrls: string[];      // Cloud file IDs
   documentNames: string[];
   localDocumentUris?: string[]; // Device cache URIs for documents
+  localDocumentNames?: string[]; // Names for local documents
   customFields: Record<string, any>; // Phase 2
   groupId?: string;            // Link multiple occurrences
   groupTitle?: string;         // Optional title for the group

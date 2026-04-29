@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable, Platform, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Pressable, Platform, TextInput, Alert, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Plus, Calendar, MapPin, Search, Filter, X } from 'lucide-react-native';
-import { useEventStore } from '../../store/eventStore';
-import { TAG_THEMES, TAGS_LIST } from '../../constants/themes';
-import { LifeEvent, TagId } from '../../types';
+import { Plus, Calendar, MapPin, Search, Filter, X, ArrowLeft } from 'lucide-react-native';
+import { useEventStore } from '../store/eventStore';
+import { useAuthStore } from '../store/authStore';
+import { TAG_THEMES, TAGS_LIST } from '../constants/themes';
+import { LifeEvent, TagId } from '../types';
 import Animated, { FadeInDown, FadeIn, Layout } from 'react-native-reanimated';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { Image as ExpoImage } from 'expo-image';
-import DriveImage from '../../components/ui/DriveImage';
+import DriveImage from '../components/ui/DriveImage';
 
 export default function TimelineScreen() {
   const insets = useSafeAreaInsets();
@@ -24,6 +25,18 @@ export default function TimelineScreen() {
   const [showDateFilters, setShowDateFilters] = useState(false);
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  
+  const user = useAuthStore((state) => state.user);
+  const fetchEvents = useEventStore((state) => state.fetchEvents);
+
+  const onRefresh = React.useCallback(async () => {
+    if (user) {
+      setIsRefreshing(true);
+      await fetchEvents(user.uid);
+      setIsRefreshing(false);
+    }
+  }, [user, fetchEvents]);
 
   const sortedEvents = [...events]
     .filter((e) => (activeTags.length > 0 ? e.tags.some(t => activeTags.includes(t)) : true))
@@ -38,7 +51,7 @@ export default function TimelineScreen() {
     })
     .filter((e) => {
       if (!startDate && !endDate) return true;
-      if (e.isDateUnknown) return false; // Exclude unknown dates from range filtering
+      if (e.isDateUnknown) return false; 
       
       const eventDateStr = e.eventDate;
       if (startDate) {
@@ -55,10 +68,16 @@ export default function TimelineScreen() {
       if (a.isDateUnknown && b.isDateUnknown) return 0;
       if (a.isDateUnknown) return 1;
       if (b.isDateUnknown) return -1;
-      return new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime();
+      
+      const dateCompare = new Date(b.eventDate).getTime() - new Date(a.eventDate).getTime();
+      if (dateCompare !== 0) return dateCompare;
+
+      // Same date, sort by index ascending (1, 2, 3...)
+      // Since timeline is newest first, for same day we show Sitting 1, then Sitting 2? 
+      // Actually, usually you want Sitting 1 then Sitting 2 on the same day.
+      return (a.occurrenceIndex || 0) - (b.occurrenceIndex || 0);
     });
 
-  // Only use custom header theme if exactly one tag is selected
   const activeTheme = activeTags.length === 1 ? TAG_THEMES[activeTags[0]] : null;
   const headerBg = activeTheme ? activeTheme.background : '#ffffff';
   const headerText = activeTheme ? activeTheme.primary : '#0f172a';
@@ -76,6 +95,9 @@ export default function TimelineScreen() {
       {/* Header */}
       <Animated.View style={[styles.header, { paddingTop: insets.top + 20, backgroundColor: headerBg }]}>
         <View style={styles.headerTop}>
+          <Pressable onPress={() => router.back()} style={styles.backButton}>
+            <ArrowLeft color={headerText} size={24} />
+          </Pressable>
           {isSearching ? (
             <View style={styles.searchContainer}>
               <TextInput
@@ -264,6 +286,14 @@ export default function TimelineScreen() {
             <Text style={styles.emptySubtitle}>Start documenting your life's journey by adding your first event.</Text>
           </View>
         }
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            colors={['#6366f1']} // Android
+            tintColor="#6366f1" // iOS
+          />
+        }
         renderItem={({ item, index }) => {
           const matchedTagId = activeTags.length > 0 
             ? item.tags.find(t => activeTags.includes(t)) || item.tags[0]
@@ -399,11 +429,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     marginBottom: 20,
+    gap: 12,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.03)',
   },
   headerTitle: {
-    fontSize: 32,
+    flex: 1,
+    fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
   },

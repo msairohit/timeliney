@@ -102,17 +102,44 @@ export default function EventDetailScreen() {
   const EventIcon = primaryTag.icon;
 
   const handleDelete = () => {
-    Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
-      { text: 'Cancel', style: 'cancel' },
-      { 
-        text: 'Delete', 
-        style: 'destructive', 
-        onPress: () => {
-          deleteEvent(event.id);
-          router.back();
-        } 
-      },
-    ]);
+    const hasMedia = (event.mediaUrls?.length || 0) > 0 || (event.documentUrls?.length || 0) > 0;
+
+    if (hasMedia) {
+      Alert.alert(
+        'Delete Event',
+        'This event has associated media. Would you like to keep the media as a backup or delete it from Google Drive?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Backup Media', 
+            onPress: () => {
+              deleteEvent(event.id, { deleteMedia: false });
+              router.back();
+            } 
+          },
+          { 
+            text: 'Delete Media', 
+            style: 'destructive', 
+            onPress: () => {
+              deleteEvent(event.id, { deleteMedia: true });
+              router.back();
+            } 
+          },
+        ]
+      );
+    } else {
+      Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive', 
+          onPress: () => {
+            deleteEvent(event.id);
+            router.back();
+          } 
+        },
+      ]);
+    }
   };
 
   const formatDate = (dateStr: string, isUnknown?: boolean) => {
@@ -196,7 +223,7 @@ export default function EventDetailScreen() {
       {/* Animated Header */}
       <Animated.View style={[styles.header, headerStyle, { paddingTop: insets.top }]}>
         <View style={styles.headerContent}>
-          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)')} style={styles.headerButton}>
+          <Pressable onPress={() => router.canGoBack() ? router.back() : router.replace('/')} style={styles.headerButton}>
             <ArrowLeft size={24} color="#1e293b" />
           </Pressable>
           
@@ -351,23 +378,39 @@ export default function EventDetailScreen() {
             <Animated.View entering={FadeInDown.duration(600).delay(600)} style={styles.section}>
               <Text style={styles.sectionTitle}>Media</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.mediaContainer}>
-                {Array.from({ length: Math.max(event.localMediaUris?.length || 0, event.mediaUrls?.length || 0) }).map((_, index) => {
-                  const localUri = event.localMediaUris?.[index];
-                  const cloudUrl = event.mediaUrls?.[index];
-                  const key = (localUri || cloudUrl || '') + index;
+                {(() => {
+                  const localMedia = (event.localMediaUris || []).map((uri, i) => ({
+                    uri,
+                    name: event.localMediaNames?.[i] || uri.split('/').pop() || 'image'
+                  }));
+                  const cloudMedia = (event.mediaUrls || []).map((uri, i) => ({
+                    uri,
+                    name: event.mediaNames?.[i] || uri.split('/').pop() || 'image'
+                  }));
                   
-                  return (
-                    <Pressable key={key} onPress={() => handleOpenImage(localUri || cloudUrl || '')}>
-                      <SmartImage 
-                        localUri={localUri}
-                        cloudUrl={cloudUrl}
-                        style={styles.mediaImage}
-                        contentFit="cover"
-                        transition={200}
-                      />
-                    </Pressable>
-                  );
-                })}
+                  // In detail view, we show all unique media
+                  const allMedia = [...localMedia];
+                  cloudMedia.forEach(cm => {
+                    if (!allMedia.some(am => am.uri === cm.uri)) {
+                      allMedia.push(cm);
+                    }
+                  });
+
+                  return allMedia.map((item, index) => (
+                    <View key={item.uri + index} style={styles.mediaItem}>
+                      <Pressable onPress={() => handleOpenImage(item.uri)}>
+                        <SmartImage 
+                          localUri={!item.uri.startsWith('http') ? item.uri : undefined}
+                          cloudUrl={item.uri.startsWith('http') ? item.uri.split('/').pop()?.split('?')[0] || item.uri : item.uri}
+                          style={styles.mediaImage}
+                          contentFit="cover"
+                          transition={200}
+                        />
+                      </Pressable>
+                      <Text style={styles.mediaName} numberOfLines={1}>{item.name}</Text>
+                    </View>
+                  ));
+                })()}
               </ScrollView>
             </Animated.View>
           )}
@@ -412,24 +455,25 @@ export default function EventDetailScreen() {
         transparent={true}
         onRequestClose={() => setSelectedImage(null)}
         animationType="fade"
+        statusBarTranslucent={true}
       >
         <View style={styles.modalContainer}>
           <Pressable 
-            style={styles.modalCloseButton} 
+            style={[styles.modalCloseButton, { top: Math.max(insets.top, 20) }]} 
             onPress={() => setSelectedImage(null)}
           >
             <X size={28} color="#fff" />
           </Pressable>
           {selectedImage && (
             <SmartImage
-              localUri={selectedImage.startsWith('http') ? undefined : selectedImage}
-              cloudUrl={selectedImage.startsWith('http') ? selectedImage : undefined}
+              localUri={(selectedImage.startsWith('file://') || selectedImage.startsWith('/')) ? selectedImage : undefined}
+              cloudUrl={!(selectedImage.startsWith('file://') || selectedImage.startsWith('/')) ? selectedImage : undefined}
               style={styles.fullImage}
               contentFit="contain"
             />
           )}
           <Pressable 
-            style={styles.modalShareButton}
+            style={[styles.modalShareButton, { bottom: Math.max(insets.bottom, 40) }]}
             onPress={() => selectedImage && handleOpenDocument(selectedImage)}
           >
             <Share2 size={20} color="#fff" />
@@ -611,14 +655,25 @@ const styles = StyleSheet.create({
     color: '#334155',
   },
   mediaContainer: {
-    gap: 12,
+    gap: 16,
     marginTop: 16,
+  },
+  mediaItem: {
+    width: 200,
+    gap: 8,
   },
   mediaImage: {
     width: 200,
     height: 150,
     borderRadius: 20,
     backgroundColor: '#f8fafc',
+  },
+  mediaName: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '500',
+    textAlign: 'center',
+    paddingHorizontal: 4,
   },
   docsList: {
     gap: 12,
@@ -671,19 +726,18 @@ const styles = StyleSheet.create({
   },
   modalCloseButton: {
     position: 'absolute',
-    top: 50,
+    top: 20, // Will be adjusted in component
     right: 20,
     zIndex: 10,
     padding: 10,
   },
   fullImage: {
     width: width,
-    height: width * 1.5,
-    maxHeight: '80%',
+    height: '100%',
   },
   modalShareButton: {
     position: 'absolute',
-    bottom: 50,
+    bottom: 40, // Will be adjusted in component
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',

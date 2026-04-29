@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from 'react-nati
 import * as ExpoDocumentPicker from 'expo-document-picker';
 import { FileText, X, Plus, File } from 'lucide-react-native';
 import Animated, { FadeIn, FadeOut, Layout } from 'react-native-reanimated';
+import { RenameModal } from '../common/RenameModal';
 
 interface DocumentPickerProps {
   documents: { uri: string; name: string }[];
@@ -10,6 +11,7 @@ interface DocumentPickerProps {
 }
 
 export function DocumentPicker({ documents, onDocumentsChange }: DocumentPickerProps) {
+  const [renameIndex, setRenameIndex] = React.useState<number | null>(null);
   const pickDocument = async () => {
     try {
       const result = await ExpoDocumentPicker.getDocumentAsync({
@@ -36,6 +38,26 @@ export function DocumentPicker({ documents, onDocumentsChange }: DocumentPickerP
     onDocumentsChange(newDocs);
   };
 
+  const renameDocument = (index: number) => {
+    setRenameIndex(index);
+  };
+
+  const handleRenameSave = (newName: string) => {
+    if (renameIndex !== null) {
+      const currentName = documents[renameIndex].name;
+      const newDocs = [...documents];
+      // Ensure extension is preserved if not provided
+      let finalName = newName.trim();
+      const oldExt = currentName.split('.').pop();
+      if (oldExt && !finalName.toLowerCase().endsWith('.' + oldExt.toLowerCase())) {
+        finalName += '.' + oldExt;
+      }
+      newDocs[renameIndex].name = finalName;
+      onDocumentsChange(newDocs);
+      setRenameIndex(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -58,9 +80,15 @@ export function DocumentPicker({ documents, onDocumentsChange }: DocumentPickerP
             <View style={styles.docIconContainer}>
               <File size={20} color="#6366f1" />
             </View>
-            <Text style={styles.docName} numberOfLines={1}>
-              {doc.name}
-            </Text>
+            <Pressable 
+              onPress={() => renameDocument(index)} 
+              style={styles.docNameContainer}
+            >
+              <Text style={styles.docName} numberOfLines={1}>
+                {doc.name}
+              </Text>
+              <Text style={styles.renameHint}>Tap to rename</Text>
+            </Pressable>
             <Pressable 
               onPress={() => removeDocument(index)} 
               style={styles.removeButton}
@@ -78,6 +106,14 @@ export function DocumentPicker({ documents, onDocumentsChange }: DocumentPickerP
           <Text style={styles.addText}>Add Document</Text>
         </Pressable>
       </View>
+
+      <RenameModal
+        visible={renameIndex !== null}
+        initialValue={renameIndex !== null ? documents[renameIndex].name : ''}
+        title="Rename Document"
+        onSave={handleRenameSave}
+        onCancel={() => setRenameIndex(null)}
+      />
     </View>
   );
 }
@@ -128,11 +164,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
-  docName: {
+  docNameContainer: {
     flex: 1,
+  },
+  docName: {
     fontSize: 14,
     fontWeight: '500',
     color: '#334155',
+  },
+  renameHint: {
+    fontSize: 10,
+    color: '#94a3b8',
+    marginTop: 2,
   },
   removeButton: {
     padding: 4,

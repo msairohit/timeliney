@@ -1,59 +1,59 @@
 import React, { useEffect } from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { useAuthStore } from '../../store/authStore';
 import { GOOGLE_CONFIG } from '../../constants/GoogleConfig';
 import { useRouter } from 'expo-router';
 import { LogIn } from 'lucide-react-native';
 
-WebBrowser.maybeCompleteAuthSession();
+GoogleSignin.configure({
+  webClientId: GOOGLE_CONFIG.webClientId,
+  iosClientId: GOOGLE_CONFIG.iosClientId,
+  scopes: GOOGLE_CONFIG.scopes,
+});
 
 export default function GoogleLoginButton() {
   const router = useRouter();
   const { setUser, setLoading, isLoading } = useAuthStore();
 
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    androidClientId: GOOGLE_CONFIG.androidClientId,
-    iosClientId: GOOGLE_CONFIG.iosClientId,
-    webClientId: GOOGLE_CONFIG.webClientId,
-    scopes: GOOGLE_CONFIG.scopes,
-  }, {
-    scheme: 'timeliney',
-    useProxy: false,
-  });
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const { authentication } = response;
-      handleGoogleSignIn(authentication?.accessToken);
-    } else if (response?.type === 'error') {
-      Alert.alert('Authentication Error', response.error?.message || 'Failed to sign in with Google');
-    }
-  }, [response]);
-
-  const handleGoogleSignIn = async (accessToken: string | undefined) => {
-    if (!accessToken) return;
-
+  const handleGoogleSignIn = async () => {
+    if (isLoading) return;
+    
     setLoading(true);
     try {
-      // Fetch user info from Google
-      const userInfoResponse = await fetch('https://www.googleapis.com/userinfo/v2/me', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      const userInfo = await userInfoResponse.json();
-
-      setUser({
-        uid: userInfo.id,
-        email: userInfo.email,
-        username: userInfo.name,
-        accessToken: accessToken,
-      });
-
-      router.replace('/(tabs)');
+      await GoogleSignin.hasPlayServices();
+      const response = await GoogleSignin.signIn();
+      
+      if (response.type === 'success') {
+        const userInfo = response.data;
+        
+        // We need the actual accessToken for Google Drive API, not the idToken
+        const { accessToken } = await GoogleSignin.getTokens();
+        
+        setUser({
+          uid: userInfo.user.id,
+          email: userInfo.user.email,
+          username: userInfo.user.name || '',
+          displayName: userInfo.user.name,
+          photo: userInfo.user.photo,
+          accessToken: accessToken || '',
+        });
+        router.replace('/');
+      }
     } catch (error: any) {
       console.error('Google Sign-In Error:', error);
-      Alert.alert('Error', 'Failed to fetch user info from Google');
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // user cancelled the login flow
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        // operation (e.g. sign in) is in progress already
+        Alert.alert('Sign in in progress', 'Please wait...');
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        // play services not available or outdated
+        Alert.alert('Error', 'Google Play Services are not available');
+      } else {
+        // some other error
+        Alert.alert('Error', 'Failed to sign in with Google');
+      }
     } finally {
       setLoading(false);
     }
@@ -62,8 +62,8 @@ export default function GoogleLoginButton() {
   return (
     <TouchableOpacity
       style={styles.button}
-      onPress={() => promptAsync()}
-      disabled={!request || isLoading}
+      onPress={handleGoogleSignIn}
+      disabled={isLoading}
     >
       {isLoading ? (
         <ActivityIndicator color="#1e293b" />

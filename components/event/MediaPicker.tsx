@@ -1,15 +1,17 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Image, ScrollView, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Image as ImageIcon, X, Plus, Camera } from 'lucide-react-native';
+import { ImageIcon, X, Plus } from 'lucide-react-native';
 import Animated, { FadeIn, FadeOut, Layout } from 'react-native-reanimated';
+import { RenameModal } from '../common/RenameModal';
 
 interface MediaPickerProps {
-  uris: string[];
-  onUrisChange: (uris: string[]) => void;
+  media: { uri: string; name: string }[];
+  onMediaChange: (media: { uri: string; name: string }[]) => void;
 }
 
-export function MediaPicker({ uris, onUrisChange }: MediaPickerProps) {
+export function MediaPicker({ media, onMediaChange }: MediaPickerProps) {
+  const [renameIndex, setRenameIndex] = React.useState<number | null>(null);
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     
@@ -25,8 +27,11 @@ export function MediaPicker({ uris, onUrisChange }: MediaPickerProps) {
     });
 
     if (!result.canceled) {
-      const newUris = result.assets.map(asset => asset.uri);
-      onUrisChange([...uris, ...newUris]);
+      const newMedia = result.assets.map(asset => ({
+        uri: asset.uri,
+        name: asset.uri.split('/').pop() || `image_${Date.now()}`
+      }));
+      onMediaChange([...media, ...newMedia]);
     }
   };
 
@@ -44,14 +49,38 @@ export function MediaPicker({ uris, onUrisChange }: MediaPickerProps) {
     });
 
     if (!result.canceled) {
-      onUrisChange([...uris, result.assets[0].uri]);
+      const asset = result.assets[0];
+      onMediaChange([...media, {
+        uri: asset.uri,
+        name: asset.uri.split('/').pop() || `photo_${Date.now()}`
+      }]);
     }
   };
 
   const removeImage = (index: number) => {
-    const newUris = [...uris];
-    newUris.splice(index, 1);
-    onUrisChange(newUris);
+    const newMedia = [...media];
+    newMedia.splice(index, 1);
+    onMediaChange(newMedia);
+  };
+
+  const renameImage = (index: number) => {
+    setRenameIndex(index);
+  };
+
+  const handleRenameSave = (newName: string) => {
+    if (renameIndex !== null) {
+      const currentName = media[renameIndex].name;
+      const newMedia = [...media];
+      // Ensure extension is preserved if not provided
+      let finalName = newName.trim();
+      const oldExt = currentName.split('.').pop();
+      if (oldExt && !finalName.toLowerCase().endsWith('.' + oldExt.toLowerCase())) {
+        finalName += '.' + oldExt;
+      }
+      newMedia[renameIndex].name = finalName;
+      onMediaChange(newMedia);
+      setRenameIndex(null);
+    }
   };
 
   const handleAddPress = () => {
@@ -73,7 +102,7 @@ export function MediaPicker({ uris, onUrisChange }: MediaPickerProps) {
           <ImageIcon size={20} color="#64748b" />
           <Text style={styles.title}>Media</Text>
         </View>
-        <Text style={styles.count}>{uris.length} items</Text>
+        <Text style={styles.count}>{media.length} items</Text>
       </View>
 
       <ScrollView 
@@ -89,15 +118,20 @@ export function MediaPicker({ uris, onUrisChange }: MediaPickerProps) {
           <Text style={styles.addText}>Add</Text>
         </Pressable>
 
-        {uris.map((uri, index) => (
+        {media.map((item, index) => (
           <Animated.View 
-            key={uri + index}
+            key={item.uri + index}
             entering={FadeIn}
             exiting={FadeOut}
             layout={Layout.springify()}
             style={styles.imageContainer}
           >
-            <Image source={{ uri }} style={styles.image} />
+            <Pressable onPress={() => renameImage(index)} style={styles.imageWrapper}>
+              <Image source={{ uri: item.uri }} style={styles.image} />
+              <View style={styles.nameBadge}>
+                <Text style={styles.nameBadgeText} numberOfLines={1}>{item.name}</Text>
+              </View>
+            </Pressable>
             <Pressable 
               onPress={() => removeImage(index)} 
               style={styles.removeButton}
@@ -107,6 +141,14 @@ export function MediaPicker({ uris, onUrisChange }: MediaPickerProps) {
           </Animated.View>
         ))}
       </ScrollView>
+
+      <RenameModal
+        visible={renameIndex !== null}
+        initialValue={renameIndex !== null ? media[renameIndex].name : ''}
+        title="Rename Media"
+        onSave={handleRenameSave}
+        onCancel={() => setRenameIndex(null)}
+      />
     </View>
   );
 }
@@ -164,9 +206,27 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
   },
+  imageWrapper: {
+    width: '100%',
+    height: '100%',
+  },
   image: {
     width: '100%',
     height: '100%',
+  },
+  nameBadge: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  nameBadgeText: {
+    color: '#fff',
+    fontSize: 8,
+    textAlign: 'center',
   },
   removeButton: {
     position: 'absolute',
