@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="resources/logo.png" width="120" height="120" alt="Timeliney Logo" />
+</p>
+
 # Timeliney 👋
 
 Timeliney is a powerful, privacy-focused life logging application designed to help you document, organize, and relive your life's journey. From daily moments to major milestones, Timeliney turns your history into a beautiful, interactive story.
