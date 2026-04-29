@@ -1,50 +1,82 @@
-# Welcome to your Expo app 👋
+# Timeliney 👋
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Timeliney is a powerful, privacy-focused life logging application designed to help you document, organize, and relive your life's journey. From daily moments to major milestones, Timeliney turns your history into a beautiful, interactive story.
 
-## Get started
+## ✨ Features
 
-1. Install dependencies
+### 📊 Interactive Dashboard
+Your life at a glance. The dashboard surfaces relevant insights every day:
+- **On This Day:** Relive memories from exactly 1, 2, or 10 years ago.
+- **Coming Up:** Never miss an anniversary or a future milestone.
+- **Life Summary:** View statistics about your journey, including total moments captured and your life's primary focus areas.
+- **Random Flashbacks:** Stay connected to your past with unexpected "Recall" moments.
 
+### 📅 Dynamic Timeline
+A seamless chronological stream of your experiences. The timeline allows you to:
+- Browse your entire history with smooth, animated transitions.
+- Filter events by tags or categories.
+- Search for specific moments using titles or descriptions.
+
+### 🌟 Story Highlights
+Focus on what matters most. Highlights curate your most significant milestones and media-rich events, presenting them in a visually stunning format.
+
+### ☁️ Secure Google Drive Sync
+Your data stays with you. Timeliney integrates directly with your Google Drive to:
+- Provide seamless cross-device synchronization.
+- Automatically backup your events, photos, and documents.
+- Ensure your history is never lost, even if you switch devices.
+
+### 📂 Event Series & Media
+- **Series Tracking:** Group related events (like a vacation or a learning journey) into a cohesive series.
+- **Rich Media:** Attach photos, videos, and documents to any event to preserve the full context of the moment.
+
+---
+
+## 📸 Screenshots
+
+| Dashboard | Timeline | Highlights |
+| :---: | :---: | :---: |
+| ![Dashboard Placeholder](resources/dashboard.png) | ![Timeline Placeholder](resources/timeline.png) | ![Highlights1 Placeholder](resources/highlight1.png)![Highlights2 Placeholder](resources/highlight2.png) |
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) (v18 or newer)
+- [Expo Go](https://expo.dev/go) on your mobile device or an Emulator (Android/iOS)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/timeliney.git
+   cd timeliney
+   ```
+
+2. **Install dependencies**
    ```bash
    npm install
    ```
 
-2. Start the app
+3. **Configure Environment**
+   Create a `.env` file or update your `app.json` with your Google Cloud Console credentials for Google Sign-In and Drive API access.
 
+4. **Start the development server**
    ```bash
    npx expo start
    ```
 
-In the output, you'll find options to open the app in a
+---
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## 🛠️ Tech Stack
+- **Framework:** [Expo](https://expo.dev/) / React Native
+- **State Management:** [Zustand](https://github.com/pmndrs/zustand)
+- **Styling:** React Native StyleSheet / [Lucide Icons](https://lucide.dev/)
+- **Animations:** [React Native Reanimated](https://www.reanimated2.com/)
+- **Backend/Storage:** Google Drive API for data persistence and media storage.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+---
 
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## 📄 License
+This project is licensed under the MIT License.
