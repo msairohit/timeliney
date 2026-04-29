@@ -70,7 +70,7 @@ const LoadingScreen = () => {
         <View style={styles.logoContainer}>
           <Animated.View style={[styles.logoOutline, animatedLogoStyle]} />
           <Image 
-            source={require('../assets/images/splash-icon.png')} 
+            source={require('../assets/images/splash_icon.png')} 
             style={styles.logo}
             resizeMode="contain"
           />
