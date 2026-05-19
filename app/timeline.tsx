@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Pressable, Platform, TextInput, Alert, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { Plus, Calendar, MapPin, Search, Filter, X, ArrowLeft } from 'lucide-react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Plus, Calendar, MapPin, Search, Filter, X, ArrowLeft, LayoutList, List, CalendarDays, Grid3X3, Users } from 'lucide-react-native';
 import { useEventStore } from '../store/eventStore';
 import { useAuthStore } from '../store/authStore';
 import { TAG_THEMES, TAGS_LIST } from '../constants/themes';
@@ -12,11 +12,17 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { Image as ExpoImage } from 'expo-image';
 import DriveImage from '../components/ui/DriveImage';
+import { formatDuration, formatDateRange } from '../utils/duration';
+import CompactView from '../components/timeline/CompactView';
+import CalendarView from '../components/timeline/CalendarView';
+import YearView from '../components/timeline/YearView';
 
 export default function TimelineScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ year?: string, tag?: string, search?: string }>();
   const events = useEventStore((state) => state.events);
+  const [viewMode, setViewMode] = useState<'default' | 'compact' | 'calendar' | 'year'>('default');
   const [activeTags, setActiveTags] = useState<TagId[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -29,6 +35,23 @@ export default function TimelineScreen() {
   
   const user = useAuthStore((state) => state.user);
   const fetchEvents = useEventStore((state) => state.fetchEvents);
+
+  React.useEffect(() => {
+    if (params.tag) {
+      setActiveTags([params.tag as TagId]);
+    }
+    if (params.search) {
+      setSearchQuery(params.search);
+      setIsSearching(true);
+    }
+    if (params.year) {
+      const yearStart = new Date(`${params.year}-01-01T00:00:00`);
+      const yearEnd = new Date(`${params.year}-12-31T23:59:59`);
+      setStartDate(yearStart);
+      setEndDate(yearEnd);
+      setShowDateFilters(true);
+    }
+  }, [params.year, params.tag, params.search]);
 
   const onRefresh = React.useCallback(async () => {
     if (user) {
@@ -46,21 +69,24 @@ export default function TimelineScreen() {
       return (
         e.title.toLowerCase().includes(q) ||
         (e.description && e.description.toLowerCase().includes(q)) ||
-        (e.place && e.place.toLowerCase().includes(q))
+        (e.place && e.place.toLowerCase().includes(q)) ||
+        (e.people && e.people.some(p => p.toLowerCase().includes(q)))
       );
     })
     .filter((e) => {
       if (!startDate && !endDate) return true;
       if (e.isDateUnknown) return false; 
       
-      const eventDateStr = e.eventDate;
+      const eventStart = e.eventDate;
+      const eventEnd = e.endDate || e.eventDate; // range events: check overlap
+      
       if (startDate) {
         const startStr = format(startDate, 'yyyy-MM-dd');
-        if (eventDateStr < startStr) return false;
+        if (eventEnd < startStr) return false;
       }
       if (endDate) {
         const endStr = format(endDate, 'yyyy-MM-dd');
-        if (eventDateStr > endStr) return false;
+        if (eventStart > endStr) return false;
       }
       return true;
     })
@@ -131,6 +157,19 @@ export default function TimelineScreen() {
                   onPress={() => setShowDateFilters(!showDateFilters)}
                 >
                   <Filter color={(startDate || endDate) ? '#2563eb' : headerText} size={22} />
+                </Pressable>
+                <Pressable 
+                  style={styles.iconButton} 
+                  onPress={() => {
+                    const modes: ('default' | 'compact' | 'calendar' | 'year')[] = ['default', 'compact', 'calendar', 'year'];
+                    const nextMode = modes[(modes.indexOf(viewMode) + 1) % modes.length];
+                    setViewMode(nextMode);
+                  }}
+                >
+                  {viewMode === 'default' && <List color={headerText} size={22} />}
+                  {viewMode === 'compact' && <LayoutList color={headerText} size={22} />}
+                  {viewMode === 'calendar' && <CalendarDays color={headerText} size={22} />}
+                  {viewMode === 'year' && <Grid3X3 color={headerText} size={22} />}
                 </Pressable>
               </View>
             </>
@@ -275,9 +314,16 @@ export default function TimelineScreen() {
       </Animated.View>
 
       {/* Timeline List */}
-      <FlatList
-        data={sortedEvents}
-        keyExtractor={(item) => item.id}
+      {viewMode === 'compact' ? (
+        <CompactView events={sortedEvents} router={router} onRefresh={onRefresh} isRefreshing={isRefreshing} insets={insets} />
+      ) : viewMode === 'calendar' ? (
+        <CalendarView events={sortedEvents} router={router} onRefresh={onRefresh} isRefreshing={isRefreshing} insets={insets} />
+      ) : viewMode === 'year' ? (
+        <YearView events={sortedEvents} router={router} onRefresh={onRefresh} isRefreshing={isRefreshing} insets={insets} />
+      ) : (
+        <FlatList
+          data={sortedEvents}
+          keyExtractor={(item) => item.id}
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 100 }]}
         ListEmptyComponent={
           <View style={styles.emptyState}>
@@ -299,7 +345,7 @@ export default function TimelineScreen() {
             ? item.tags.find(t => activeTags.includes(t)) || item.tags[0]
             : item.tags[0];
           const primaryTag = matchedTagId ? TAG_THEMES[matchedTagId] : TAG_THEMES.other;
-          
+          const isRange = !!(item.endDate || item.isEndDateUnknown);
           
           const currentYear = item.isDateUnknown ? 'Unknown' : new Date(item.eventDate).getFullYear();
           const prevYear = index > 0 
@@ -323,20 +369,52 @@ export default function TimelineScreen() {
                 onPress={() => router.push(`/event/${item.id}`)}
                 style={styles.cardContainer}
               >
-                {/* Connector Line & Dot */}
+                {/* Connector Line & Dot — Span bar for range events */}
                 <View style={styles.timelineLeft}>
                   <View style={[styles.dot, { backgroundColor: primaryTag.primary }]} />
-                  <View style={[styles.line, { backgroundColor: primaryTag.cardBorder }]} />
+                  {isRange ? (
+                    <View style={[styles.spanBar, { backgroundColor: primaryTag.primary + '30' }]}>
+                      <View style={[styles.spanBarInner, { backgroundColor: primaryTag.primary }]} />
+                    </View>
+                  ) : (
+                    <View style={[styles.line, { backgroundColor: primaryTag.cardBorder }]} />
+                  )}
+                  {isRange && (
+                    <View style={[styles.dot, { backgroundColor: primaryTag.primary, marginTop: 0 }]} />
+                  )}
+                  {!isRange && null}
                 </View>
                 
                 {/* Card */}
-                <View style={[styles.card, { borderColor: primaryTag.cardBorder, backgroundColor: primaryTag.background }]}>
-                  <Text style={styles.cardDate}>
-                    {item.isDateUnknown 
-                      ? 'Unknown Date' 
-                      : new Date(item.eventDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                    {item.isTimeUnknown ? ' • Unknown Time' : (item.eventTime && ` • ${item.eventTime}`)}
-                  </Text>
+                <View style={[
+                  styles.card, 
+                  { borderColor: primaryTag.cardBorder, backgroundColor: primaryTag.background },
+                  isRange && { borderLeftWidth: 3, borderLeftColor: primaryTag.primary }
+                ]}>
+                  {/* Date display */}
+                  {isRange ? (
+                    <View style={styles.dateRangeRow}>
+                      <Text style={styles.cardDate}>
+                        {item.isDateUnknown 
+                          ? 'Unknown' 
+                          : formatDateRange(item.eventDate, item.endDate, item.isEndDateUnknown)}
+                      </Text>
+                      <View style={[styles.durationPill, { backgroundColor: primaryTag.primary + '20' }]}>
+                        <Text style={[styles.durationPillText, { color: primaryTag.primary }]}>
+                          {item.isEndDateUnknown 
+                            ? 'Ongoing' 
+                            : formatDuration(item.eventDate, item.endDate)}
+                        </Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <Text style={styles.cardDate}>
+                      {item.isDateUnknown 
+                        ? 'Unknown Date' 
+                        : new Date(item.eventDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                      {item.isTimeUnknown ? ' • Unknown Time' : (item.eventTime && ` • ${item.eventTime}`)}
+                    </Text>
+                  )}
                   <View style={styles.cardHeaderRow}>
                     <Text style={[styles.cardTitle, { color: primaryTag.badgeText }]}>{item.title}</Text>
                     {item.groupId && (
@@ -382,6 +460,12 @@ export default function TimelineScreen() {
                         </View>
                       );
                     })}
+                    {item.people?.map((person, idx) => (
+                      <View key={`person-${idx}`} style={[styles.badge, { backgroundColor: '#f1f5f9' }]}>
+                        <Users size={12} color="#475569" />
+                        <Text style={[styles.badgeText, { color: '#475569' }]}>{person}</Text>
+                      </View>
+                    ))}
                   </View>
                 </View>
               </Pressable>
@@ -389,6 +473,7 @@ export default function TimelineScreen() {
           );
         }}
       />
+      )}
 
       {/* FAB */}
       <Pressable 
@@ -600,6 +685,37 @@ const styles = StyleSheet.create({
     flex: 1,
     marginTop: 8,
     borderRadius: 1,
+  },
+  spanBar: {
+    width: 8,
+    flex: 1,
+    marginTop: 6,
+    marginBottom: 6,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spanBarInner: {
+    width: 3,
+    height: '100%',
+    borderRadius: 2,
+  },
+  dateRangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    gap: 8,
+  },
+  durationPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  durationPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   card: {
     flex: 1,

@@ -6,11 +6,17 @@ import { GOOGLE_CONFIG } from '../../constants/GoogleConfig';
 import { useRouter } from 'expo-router';
 import { LogIn } from 'lucide-react-native';
 
-GoogleSignin.configure({
-  webClientId: GOOGLE_CONFIG.webClientId,
-  iosClientId: GOOGLE_CONFIG.iosClientId,
-  scopes: GOOGLE_CONFIG.scopes,
-});
+try {
+  if (GoogleSignin) {
+    GoogleSignin.configure({
+      webClientId: GOOGLE_CONFIG.webClientId,
+      iosClientId: GOOGLE_CONFIG.iosClientId,
+      scopes: GOOGLE_CONFIG.scopes,
+    });
+  }
+} catch (e) {
+  console.warn('GoogleSignin not available:', e);
+}
 
 export default function GoogleLoginButton() {
   const router = useRouter();
@@ -21,6 +27,9 @@ export default function GoogleLoginButton() {
     
     setLoading(true);
     try {
+      if (!GoogleSignin) {
+        throw new Error('Google Sign-In is not supported in this environment (likely Expo Go). Please use a development build.');
+      }
       await GoogleSignin.hasPlayServices();
       const response = await GoogleSignin.signIn();
       

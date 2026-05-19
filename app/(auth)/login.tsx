@@ -22,7 +22,7 @@ import GoogleLoginButton from '../../components/auth/GoogleLoginButton';
 
 const { width } = Dimensions.get('window');
 
-export default function LoginScreen() {
+function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -135,6 +135,8 @@ export default function LoginScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+export default LoginScreen;
 
 const styles = StyleSheet.create({
   container: {

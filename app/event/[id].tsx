@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Alert, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Alert, Dimensions, Share, Modal as RNModal, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { 
@@ -10,22 +10,28 @@ import {
   Edit2, 
   Clock, 
   Tag as TagIcon, 
-  Image as ImageIcon, 
   FileText, 
   MoreVertical,
   Share2,
   ExternalLink,
-  X
+  X,
+  MessageCircle,
+  Copy,
+  Check,
+  Users
 } from 'lucide-react-native';
 import * as Sharing from 'expo-sharing';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Modal } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useEventStore } from '../../store/eventStore';
 import { useAuthStore } from '../../store/authStore';
 import { TAG_THEMES } from '../../constants/themes';
 import { SmartImage } from '../../components/common/SmartImage';
 import { getCachedFile } from '../../utils/cacheManager';
+import { formatDuration, formatDateRange } from '../../utils/duration';
+import { captureRef } from 'react-native-view-shot';
+import { ShareCard } from '../../components/event/ShareCard';
 import Animated, { 
   FadeInDown, 
   FadeInRight, 
@@ -47,6 +53,11 @@ export default function EventDetailScreen() {
   const event = useEventStore((state) => state.getEventById(id as string));
   const deleteEvent = useEventStore((state) => state.deleteEvent);
   const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
+  const [showShareModal, setShowShareModal] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const [isCapturing, setIsCapturing] = React.useState(false);
+  const [cardImageUri, setCardImageUri] = React.useState<string | null>(null);
+  const shareCardRef = React.useRef<View>(null);
 
   const groupEvents = React.useMemo(() => {
     if (!event?.groupId) return [];
@@ -87,16 +98,42 @@ export default function EventDetailScreen() {
     };
   });
 
-  if (!event) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text>Event not found.</Text>
-        <Pressable onPress={() => router.back()} style={{ marginTop: 20 }}>
-          <Text style={{ color: '#0f172a', fontWeight: 'bold' }}>Go Back</Text>
-        </Pressable>
-      </View>
-    );
-  }
+  React.useEffect(() => {
+    if (!event) {
+      // Small delay to ensure navigation happens smoothly if triggered by deletion
+      const timer = setTimeout(() => {
+        if (router.canGoBack()) {
+          router.back();
+        } else {
+          router.replace('/');
+        }
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [event]);
+
+  // Pre-cache event image for the share card
+  React.useEffect(() => {
+    const loadCardImage = async () => {
+      const imageUri = event?.localMediaUris?.[0] || event?.mediaUrls?.[0];
+      if (!imageUri) { setCardImageUri(null); return; }
+      
+      if (imageUri.startsWith('file://') || imageUri.startsWith('/') || imageUri.startsWith('content://')) {
+        setCardImageUri(imageUri);
+      } else {
+        try {
+          const accessToken = useAuthStore.getState().user?.accessToken;
+          const cached = await getCachedFile(imageUri, event?.mediaNames?.[0] || event?.localMediaNames?.[0], accessToken);
+          setCardImageUri(cached);
+        } catch {
+          setCardImageUri(null);
+        }
+      }
+    };
+    if (event) loadCardImage();
+  }, [event?.id]);
+
+  if (!event) return null;
 
   const primaryTag = event.tags[0] ? TAG_THEMES[event.tags[0]] : TAG_THEMES.other;
   const EventIcon = primaryTag.icon;
@@ -218,6 +255,125 @@ export default function EventDetailScreen() {
     setSelectedImage(uri);
   };
 
+  const buildShareText = () => {
+    const lines: string[] = [];
+    
+    lines.push(`📌 ${event.title}`);
+    lines.push('');
+    
+    // Date
+    if (event.isDateUnknown) {
+      lines.push(`📅 Unknown Date`);
+    } else {
+      const isRange = !!(event.endDate || event.isEndDateUnknown);
+      if (isRange) {
+        lines.push(`📅 ${formatDateRange(event.eventDate, event.endDate, event.isEndDateUnknown, true)}`);
+        if (event.isEndDateUnknown) {
+          lines.push(`⏱ ${formatDuration(event.eventDate)} so far · Ongoing`);
+        } else if (event.endDate) {
+          lines.push(`⏱ ${formatDuration(event.eventDate, event.endDate)}`);
+        }
+      } else {
+        lines.push(`📅 ${formatDate(event.eventDate)}`);
+      }
+    }
+    
+    // Time
+    if (event.eventTime && !event.isTimeUnknown) {
+      lines.push(`🕐 ${event.eventTime}`);
+    }
+    
+    // Location
+    if (event.place) {
+      lines.push(`📍 ${event.place}`);
+    }
+    
+    lines.push('');
+    
+    // Description
+    if (event.description) {
+      lines.push(event.description);
+      lines.push('');
+    }
+    
+    // Tags and People
+    const metaTags = [];
+    if (event.tags.length > 0) {
+      metaTags.push(...event.tags.map(t => TAG_THEMES[t]?.label || t));
+    }
+    if (event.people && event.people.length > 0) {
+      metaTags.push(...event.people);
+    }
+    
+    if (metaTags.length > 0) {
+      lines.push(`🏷 ${metaTags.join(' · ')}`);
+    }
+    
+    // Series info
+    if (event.groupId && event.occurrenceIndex) {
+      lines.push(`📎 Part ${event.occurrenceIndex} of series`);
+    }
+    
+    lines.push('');
+    lines.push('— Shared from Timeliney');
+    
+    return lines.join('\n');
+  };
+
+  const handleShareText = async () => {
+    setShowShareModal(false);
+    const message = buildShareText();
+    
+    try {
+      await Share.share({
+        message,
+        title: event.title,
+      });
+    } catch (error) {
+      console.error('Error sharing:', error);
+    }
+  };
+
+  const handleShareCard = async () => {
+    if (!shareCardRef.current) return;
+    setIsCapturing(true);
+    
+    try {
+      // Small delay to ensure the card is fully rendered
+      await new Promise(r => setTimeout(r, 300));
+      
+      const uri = await captureRef(shareCardRef, {
+        format: 'png',
+        quality: 1,
+        result: 'tmpfile',
+      });
+      
+      setShowShareModal(false);
+      
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: event.title,
+        });
+      }
+    } catch (error) {
+      console.error('Error creating share card:', error);
+      setShowShareModal(false);
+      handleShareText();
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const handleCopyText = async () => {
+    const message = buildShareText();
+    await Clipboard.setStringAsync(message);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+
   return (
     <View style={styles.container}>
       {/* Animated Header */}
@@ -262,9 +418,17 @@ export default function EventDetailScreen() {
           <Animated.View entering={FadeInDown.duration(600).delay(200)}>
             <View style={styles.titleContainer}>
               <Text style={styles.title}>{event.title}</Text>
-              <View style={[styles.tagBadge, { backgroundColor: primaryTag.badgeBackground, borderColor: primaryTag.cardBorder }]}>
-                <TagIcon size={14} color={primaryTag.primary} />
-                <Text style={[styles.tagText, { color: primaryTag.primary }]}>{primaryTag.label}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <View style={[styles.tagBadge, { backgroundColor: primaryTag.badgeBackground, borderColor: primaryTag.cardBorder }]}>
+                  <TagIcon size={14} color={primaryTag.primary} />
+                  <Text style={[styles.tagText, { color: primaryTag.primary }]}>{primaryTag.label}</Text>
+                </View>
+                {event.people?.map((person, idx) => (
+                  <View key={`person-${idx}`} style={[styles.tagBadge, { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0' }]}>
+                    <Users size={14} color="#475569" />
+                    <Text style={[styles.tagText, { color: '#475569' }]}>{person}</Text>
+                  </View>
+                ))}
               </View>
             </View>
 
@@ -303,6 +467,28 @@ export default function EventDetailScreen() {
                   <View>
                     <Text style={styles.infoLabel}>Location</Text>
                     <Text style={[styles.infoValue, { color: primaryTag.badgeText }]}>{event.place}</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Date Range: End Date + Duration */}
+              {(event.endDate || event.isEndDateUnknown) && (
+                <View style={[styles.infoCard, { borderColor: primaryTag.cardBorder, borderLeftWidth: 3, borderLeftColor: primaryTag.primary }]}>
+                  <View style={[styles.infoIconWrapper, { backgroundColor: primaryTag.badgeBackground }]}>
+                    <Calendar size={18} color={primaryTag.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.infoLabel}>Period</Text>
+                    <Text style={[styles.infoValue, { color: primaryTag.badgeText }]}>
+                      {formatDateRange(event.eventDate, event.endDate, event.isEndDateUnknown, true)}
+                    </Text>
+                    <View style={[styles.durationChip, { backgroundColor: primaryTag.primary + '15' }]}>
+                      <Text style={[styles.durationChipText, { color: primaryTag.primary }]}>
+                        {event.isEndDateUnknown 
+                          ? `${formatDuration(event.eventDate)} so far · Ongoing`
+                          : formatDuration(event.eventDate, event.endDate)}
+                      </Text>
+                    </View>
                   </View>
                 </View>
               )}
@@ -442,15 +628,69 @@ export default function EventDetailScreen() {
         </View>
       </Animated.ScrollView>
 
-      {/* Floating Action for Share or More */}
+      {/* Floating Action for Share */}
       <Animated.View entering={FadeInDown.duration(600).delay(800)} style={[styles.fabContainer, { bottom: insets.bottom + 20 }]}>
-        <Pressable style={styles.fab}>
+        <Pressable style={styles.fab} onPress={() => setShowShareModal(true)}>
           <Share2 size={24} color="#fff" />
         </Pressable>
       </Animated.View>
 
+      {/* Share Options Modal */}
+      <RNModal
+        visible={showShareModal}
+        transparent={true}
+        onRequestClose={() => setShowShareModal(false)}
+        animationType="slide"
+        statusBarTranslucent={true}
+      >
+        <Pressable style={styles.shareOverlay} onPress={() => setShowShareModal(false)}>
+          <Pressable style={[styles.shareSheet, { paddingBottom: insets.bottom + 20 }]} onPress={e => e.stopPropagation()}>
+            <View style={styles.shareHandle} />
+            <Text style={styles.shareSheetTitle}>Share Event</Text>
+            
+            {/* Card Preview */}
+            <ScrollView 
+              style={styles.cardPreviewScroll} 
+              contentContainerStyle={styles.cardPreviewContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <ShareCard ref={shareCardRef} event={event} imageUri={cardImageUri} />
+            </ScrollView>
+
+            <View style={styles.shareOptions}>
+              <Pressable 
+                style={[styles.shareCardButton, isCapturing && { opacity: 0.6 }]} 
+                onPress={handleShareCard}
+                disabled={isCapturing}
+              >
+                {isCapturing ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Share2 size={20} color="#fff" />
+                )}
+                <Text style={styles.shareCardButtonText}>
+                  {isCapturing ? 'Creating...' : 'Share Event Card'}
+                </Text>
+              </Pressable>
+              
+              <View style={styles.shareSecondaryRow}>
+                <Pressable style={styles.shareSecondary} onPress={handleShareText}>
+                  <MessageCircle size={18} color="#3b82f6" />
+                  <Text style={styles.shareSecondaryText}>Text</Text>
+                </Pressable>
+                
+                <Pressable style={styles.shareSecondary} onPress={handleCopyText}>
+                  {copied ? <Check size={18} color="#16a34a" /> : <Copy size={18} color="#64748b" />}
+                  <Text style={styles.shareSecondaryText}>{copied ? 'Copied!' : 'Copy'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Pressable>
+        </Pressable>
+      </RNModal>
+
       {/* Full Screen Image Modal */}
-      <Modal
+      <RNModal
         visible={!!selectedImage}
         transparent={true}
         onRequestClose={() => setSelectedImage(null)}
@@ -480,7 +720,7 @@ export default function EventDetailScreen() {
             <Text style={styles.modalShareText}>Share</Text>
           </Pressable>
         </View>
-      </Modal>
+      </RNModal>
     </View>
   );
 }
@@ -614,6 +854,18 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#1e293b',
+  },
+  durationChip: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  durationChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   section: {
     marginBottom: 32,
@@ -804,6 +1056,81 @@ const styles = StyleSheet.create({
   addOccurrenceText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  shareOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'flex-end',
+  },
+  shareSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 12,
+    ...Platform.select({
+      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 20 },
+      android: { elevation: 20 },
+    }),
+  },
+  shareHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#e2e8f0',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  shareSheetTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginBottom: 12,
+  },
+  cardPreviewScroll: {
+    maxHeight: 340,
+    marginBottom: 16,
+  },
+  cardPreviewContent: {
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  shareOptions: {
+    gap: 10,
+    marginBottom: 8,
+  },
+  shareCardButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+    paddingVertical: 16,
+    borderRadius: 16,
+    gap: 10,
+  },
+  shareCardButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  shareSecondaryRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  shareSecondary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#f8fafc',
+    gap: 8,
+  },
+  shareSecondaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
   },
 });
 

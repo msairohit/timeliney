@@ -214,7 +214,10 @@ export default function HomeScreen() {
           </Animated.View>
         )}
         
-        <View style={styles.headerStats}>
+        <Pressable 
+          onPress={() => router.push('/statistics' as any)}
+          style={styles.headerStats}
+        >
           {stats.map((stat, index) => (
             <Animated.View 
               key={stat.label} 
@@ -226,7 +229,7 @@ export default function HomeScreen() {
               <Text style={styles.statLabel}>{stat.label}</Text>
             </Animated.View>
           ))}
-        </View>
+        </Pressable>
       </LinearGradient>
 
       <View style={styles.content}>

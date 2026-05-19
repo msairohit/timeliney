@@ -7,6 +7,8 @@ import { View, StyleSheet } from 'react-native';
 import { useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import LoadingScreen from '../components/LoadingScreen';
+import * as Notifications from 'expo-notifications';
+import { syncAnniversaryNotifications } from '../utils/notifications';
 
 // Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
@@ -16,6 +18,8 @@ export default function RootLayout() {
   const segments = useSegments();
   const router = useRouter();
   const [isMounted, setIsMounted] = useState(false);
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+  const events = useEventStore((state) => state.events);
 
   useEffect(() => {
     setIsMounted(true);
@@ -55,6 +59,28 @@ export default function RootLayout() {
     }
   }, [user, segments, isLoading, isMounted]);
 
+  useEffect(() => {
+    if (!isMounted || isLoading) return;
+
+    if (
+      lastNotificationResponse &&
+      lastNotificationResponse.notification.request.content.data.eventId &&
+      lastNotificationResponse.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER
+    ) {
+      const eventId = lastNotificationResponse.notification.request.content.data.eventId;
+      // Use set timeout to ensure navigation occurs after initial routing completes
+      setTimeout(() => {
+        router.push(`/event/${eventId}`);
+      }, 100);
+    }
+  }, [lastNotificationResponse, isMounted, isLoading]);
+
+  useEffect(() => {
+    if (isMounted && events.length > 0) {
+      syncAnniversaryNotifications(events);
+    }
+  }, [events, isMounted]);
+
   return (
     <>
       <StatusBar style="dark" />
@@ -67,6 +93,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="timeline" />
         <Stack.Screen name="profile" />
+        <Stack.Screen name="statistics" />
         <Stack.Screen name="event/new" options={{ presentation: 'modal' }} />
         <Stack.Screen name="event/[id]" />
       </Stack>

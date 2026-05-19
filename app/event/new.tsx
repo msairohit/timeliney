@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, Pressable, Platform, KeyboardAvoidingView, Switch } from 'react-native';
 import { useRouter as useExpoRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, Calendar as CalendarIcon, MapPin, Tag, Clock } from 'lucide-react-native';
+import { X, Calendar as CalendarIcon, MapPin, Tag, Clock, ArrowRight, Bell } from 'lucide-react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { useEventStore } from '../../store/eventStore';
@@ -14,6 +14,8 @@ import { v4 as uuidv4 } from 'uuid';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { MediaPicker } from '../../components/event/MediaPicker';
 import { DocumentPicker } from '../../components/event/DocumentPicker';
+import { scheduleEventNotification } from '../../utils/notifications';
+import { PeopleInput } from '../../components/event/PeopleInput';
 
 export default function CreateEventScreen() {
   const router = useExpoRouter();
@@ -55,12 +57,37 @@ export default function CreateEventScreen() {
   const [isTimeUnknown, setIsTimeUnknown] = useState(false);
   const [allMedia, setAllMedia] = useState<{ uri: string; name: string }[]>([]);
   const [documents, setDocuments] = useState<{ uri: string; name: string }[]>([]);
+  const [people, setPeople] = useState<string[]>([]);
+
+  // Date range state
+  const [isDateRange, setIsDateRange] = useState(false);
+  const [endDate, setEndDate] = useState(new Date());
+  const [isEndDateUnknown, setIsEndDateUnknown] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+
+  const pickerEndDateValue = React.useMemo(() => {
+    return (endDate instanceof Date && !isNaN(endDate.getTime())) ? endDate : new Date();
+  }, [endDate]);
   
   // Multiple occurrences state
   const [isRecurring, setIsRecurring] = useState(false);
   const [additionalDates, setAdditionalDates] = useState<Date[]>([]);
   const [showAdditionalDatePicker, setShowAdditionalDatePicker] = useState(false);
   const [editingDateIndex, setEditingDateIndex] = useState<number | null>(null);
+
+  // Reminder state
+  const [hasReminder, setHasReminder] = useState(false);
+  const [reminderDaysBefore, setReminderDaysBefore] = useState(1);
+  const [reminderTime, setReminderTime] = useState(() => {
+    const d = new Date();
+    d.setHours(9, 0, 0, 0);
+    return d;
+  });
+  const [showReminderTimePicker, setShowReminderTimePicker] = useState(false);
+  
+  const pickerReminderTimeValue = React.useMemo(() => {
+    return (reminderTime instanceof Date && !isNaN(reminderTime.getTime())) ? reminderTime : new Date();
+  }, [reminderTime]);
 
   // Calculate next index for the group
   const existingInGroup = React.useMemo(() => 
@@ -100,7 +127,11 @@ export default function CreateEventScreen() {
       isDateUnknown,
       eventTime: isTimeUnknown ? '' : format(eventTime, 'hh:mm a'),
       isTimeUnknown,
+      // Date range fields
+      endDate: isDateRange ? (isEndDateUnknown ? '' : format(endDate, 'yyyy-MM-dd')) : undefined,
+      isEndDateUnknown: isDateRange ? isEndDateUnknown : undefined,
       tags: selectedTags,
+      people,
       mediaUrls: allMedia.filter(m => !isLocal(m.uri)).map(m => m.uri),
       mediaNames: allMedia.filter(m => !isLocal(m.uri)).map(m => m.name),
       localMediaUris: allMedia.filter(m => isLocal(m.uri)).map(m => m.uri),
@@ -113,11 +144,31 @@ export default function CreateEventScreen() {
       syncStatus: 'local' as const,
       groupId: finalGroupId,
       groupTitle: (params.groupId || isRecurring) ? (params.groupTitle || title.trim()) : undefined,
+      hasReminder,
+      reminderDaysBefore: hasReminder ? reminderDaysBefore : undefined,
+      reminderTime: hasReminder ? format(reminderTime, 'hh:mm a') : undefined,
+    };
+
+    const processNotification = async (event: any) => {
+      if (hasReminder && !event.isDateUnknown) {
+        const notificationId = await scheduleEventNotification(
+          event.id,
+          event.title,
+          event.eventDate,
+          event.eventTime,
+          reminderDaysBefore,
+          event.reminderTime
+        );
+        if (notificationId) {
+          event.notificationId = notificationId;
+        }
+      }
+      return event;
     };
 
     if (isRecurring || params.groupId) {
       // Create primary event
-      const primaryEvent = {
+      let primaryEvent = {
         ...baseEvent,
         id: uuidv4(),
         eventDate: isDateUnknown ? '' : format(eventDate, 'yyyy-MM-dd'),
@@ -125,29 +176,54 @@ export default function CreateEventScreen() {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      addEvent(primaryEvent as any);
+      
+      // Async IIFE to handle notifications and saving
+      (async () => {
+        primaryEvent = await processNotification(primaryEvent);
+        addEvent(primaryEvent as any);
 
-      // Create additional occurrences if any
-      additionalDates.forEach((date, index) => {
-        const occurrenceEvent = {
-          ...baseEvent,
-          id: uuidv4(),
-          eventDate: format(date, 'yyyy-MM-dd'),
-          occurrenceIndex: 0, // Will be reordered
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        addEvent(occurrenceEvent as any);
-      });
+        // Create additional occurrences if any
+        for (let i = 0; i < additionalDates.length; i++) {
+          let occurrenceEvent = {
+            ...baseEvent,
+            id: uuidv4(),
+            eventDate: format(additionalDates[i], 'yyyy-MM-dd'),
+            occurrenceIndex: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          occurrenceEvent = await processNotification(occurrenceEvent);
+          addEvent(occurrenceEvent as any);
+        }
+
+        if (finalGroupId) {
+          useEventStore.getState().reorderGroupEvents(finalGroupId);
+        }
+        if (user && user.uid) {
+          useEventStore.getState().syncEvents(user.uid);
+        }
+        router.back();
+      })();
+      return;
     } else {
-      const newEvent = {
+      let newEvent = {
         ...baseEvent,
         id: uuidv4(),
         eventDate: isDateUnknown ? '' : format(eventDate, 'yyyy-MM-dd'),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      addEvent(newEvent as any);
+      
+      (async () => {
+        newEvent = await processNotification(newEvent);
+        addEvent(newEvent as any);
+        
+        if (user && user.uid) {
+          useEventStore.getState().syncEvents(user.uid);
+        }
+        router.back();
+      })();
+      return;
     }
 
     // Trigger sync and reorder if needed
@@ -276,6 +352,66 @@ export default function CreateEventScreen() {
           </View>
         </Animated.View>
 
+        {/* Date Range Toggle */}
+        <Animated.View entering={FadeInUp.delay(130)} style={styles.dateRangeSection}>
+          <View style={styles.dateRangeHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <ArrowRight size={20} color="#64748b" />
+              <Text style={styles.sectionTitle}>Date Range / Period</Text>
+            </View>
+            <Switch
+              value={isDateRange}
+              onValueChange={(val) => {
+                setIsDateRange(val);
+                if (!val) {
+                  setIsEndDateUnknown(false);
+                }
+              }}
+              trackColor={{ false: "#e2e8f0", true: "#0f172a" }}
+              thumbColor="#fff"
+            />
+          </View>
+          <Text style={styles.dateRangeHint}>
+            Enable for events spanning a period (e.g. school, college, job)
+          </Text>
+
+          {isDateRange && (
+            <View style={styles.endDateContainer}>
+              <View style={styles.inputGroup}>
+                <View style={styles.inputIcon}>
+                  <CalendarIcon size={20} color={isEndDateUnknown ? "#cbd5e1" : "#64748b"} />
+                </View>
+                {Platform.OS === 'ios' ? (
+                  <DateTimePicker
+                    value={pickerEndDateValue}
+                    mode="date"
+                    display="compact"
+                    onChange={(event, date) => date && setEndDate(date)}
+                    style={[styles.datePickerIos, isEndDateUnknown && { opacity: 0.3 }]}
+                    disabled={isEndDateUnknown}
+                  />
+                ) : (
+                  <Pressable
+                    onPress={() => !isEndDateUnknown && setShowEndDatePicker(true)}
+                    style={[styles.dateInputWrapper, isEndDateUnknown && { opacity: 0.3 }]}
+                  >
+                    <Text style={styles.dateText}>{format(endDate, 'PPP')}</Text>
+                  </Pressable>
+                )}
+              </View>
+              <View style={styles.unknownToggle}>
+                <Text style={styles.unknownText}>Ongoing / Unknown End</Text>
+                <Switch
+                  value={isEndDateUnknown}
+                  onValueChange={setIsEndDateUnknown}
+                  trackColor={{ false: "#e2e8f0", true: "#0f172a" }}
+                  thumbColor="#fff"
+                />
+              </View>
+            </View>
+          )}
+        </Animated.View>
+
         <Animated.View entering={FadeInUp.delay(135)} style={styles.recurringSection}>
           <View style={styles.recurringHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -361,6 +497,72 @@ export default function CreateEventScreen() {
           />
         </Animated.View>
 
+        <Animated.View entering={FadeInUp.delay(175)} style={styles.reminderSection}>
+          <View style={styles.reminderHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Bell size={20} color="#64748b" />
+              <Text style={styles.sectionTitle}>Remind Me</Text>
+            </View>
+            <Switch
+              value={hasReminder}
+              onValueChange={setHasReminder}
+              trackColor={{ false: "#e2e8f0", true: "#0f172a" }}
+              thumbColor="#fff"
+              disabled={isDateUnknown}
+            />
+          </View>
+          
+          {hasReminder && (
+            <View style={styles.reminderOptions}>
+              <Text style={styles.reminderHint}>Notify me about this event:</Text>
+              <View style={styles.reminderChips}>
+                {[0, 1, 3, 7].map((days) => (
+                  <Pressable
+                    key={days}
+                    onPress={() => setReminderDaysBefore(days)}
+                    style={[
+                      styles.reminderChip,
+                      reminderDaysBefore === days && styles.reminderChipActive
+                    ]}
+                  >
+                    <Text style={[
+                      styles.reminderChipText,
+                      reminderDaysBefore === days && styles.reminderChipTextActive
+                    ]}>
+                      {days === 0 ? 'On day' : `${days} day${days > 1 ? 's' : ''} before`}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <View style={styles.reminderTimeContainer}>
+                <Text style={styles.reminderHint}>At time:</Text>
+                {Platform.OS === 'ios' ? (
+                  <DateTimePicker
+                    value={pickerReminderTimeValue}
+                    mode="time"
+                    display="compact"
+                    onChange={(event, date) => {
+                      if (date) {
+                        date.setSeconds(0, 0, 0);
+                        setReminderTime(date);
+                      }
+                    }}
+                    style={styles.datePickerIos}
+                  />
+                ) : (
+                  <Pressable 
+                    onPress={() => setShowReminderTimePicker(true)} 
+                    style={styles.reminderTimeButton}
+                  >
+                    <Text style={styles.dateText}>{format(reminderTime, 'hh:mm a')}</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          )}
+        </Animated.View>
+
         <Animated.View entering={FadeInUp.delay(200)} style={[styles.inputGroup, styles.textAreaGroup]}>
           <TextInput
             style={styles.textArea}
@@ -401,6 +603,10 @@ export default function CreateEventScreen() {
           </View>
         </Animated.View>
 
+        <Animated.View entering={FadeInUp.delay(275)}>
+          <PeopleInput people={people} onPeopleChange={setPeople} />
+        </Animated.View>
+
         <Animated.View entering={FadeInUp.delay(300)}>
           <MediaPicker media={allMedia} onMediaChange={setAllMedia} />
         </Animated.View>
@@ -437,6 +643,33 @@ export default function CreateEventScreen() {
             if (event.type === 'set' && date) {
               date.setSeconds(0, 0, 0);
               setEventTime(date);
+            }
+          }}
+        />
+      )}
+      {showEndDatePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={pickerEndDateValue}
+          mode="date"
+          display="default"
+          onChange={(event, date) => {
+            setShowEndDatePicker(false);
+            if (event.type === 'set' && date) {
+              setEndDate(date);
+            }
+          }}
+        />
+      )}
+      {showReminderTimePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={pickerReminderTimeValue}
+          mode="time"
+          display="default"
+          onChange={(event, date) => {
+            setShowReminderTimePicker(false);
+            if (event.type === 'set' && date) {
+              date.setSeconds(0, 0, 0);
+              setReminderTime(date);
             }
           }}
         />
@@ -586,6 +819,32 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#64748b',
   },
+  dateRangeSection: {
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: '#f0f9ff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+  },
+  dateRangeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dateRangeHint: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 6,
+    fontWeight: '400',
+    lineHeight: 16,
+  },
+  endDateContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#bae6fd',
+  },
   recurringSection: {
     marginBottom: 32,
     padding: 16,
@@ -646,5 +905,68 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#0f172a',
+  },
+  reminderSection: {
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: '#fffbeb',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  reminderHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  reminderOptions: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#fde68a',
+  },
+  reminderHint: {
+    fontSize: 14,
+    color: '#92400e',
+    marginBottom: 12,
+  },
+  reminderChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  reminderChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  reminderChipActive: {
+    backgroundColor: '#d97706',
+    borderColor: '#d97706',
+  },
+  reminderChipText: {
+    fontSize: 13,
+    color: '#92400e',
+    fontWeight: '500',
+  },
+  reminderChipTextActive: {
+    color: '#fff',
+  },
+  reminderTimeContainer: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reminderTimeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#fde68a',
   },
 });

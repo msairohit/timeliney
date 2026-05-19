@@ -149,9 +149,9 @@ export class GoogleDriveService {
   }
 
   /**
-   * Create a folder if it doesn't exist
+   * Find a folder by name and parent
    */
-  async getOrCreateFolder(name: string, parentId?: string): Promise<string | null> {
+  async findFolder(name: string, parentId?: string): Promise<string | null> {
     try {
       let query = `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
       if (parentId) {
@@ -166,6 +166,21 @@ export class GoogleDriveService {
       if (data.files && data.files.length > 0) {
         return data.files[0].id;
       }
+      return null;
+    } catch (error: any) {
+      if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') throw error;
+      console.error('Error finding folder on Google Drive:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Create a folder if it doesn't exist
+   */
+  async getOrCreateFolder(name: string, parentId?: string): Promise<string | null> {
+    try {
+      const existingId = await this.findFolder(name, parentId);
+      if (existingId) return existingId;
 
       // Create folder
       const folderMetadata: any = {
@@ -317,6 +332,24 @@ export class GoogleDriveService {
       return false;
     }
   }
+  /**
+   * Rename a file or folder on Google Drive
+   */
+  async renameFile(fileId: string, newName: string): Promise<boolean> {
+    try {
+      const response = await this.safeFetch(`${DRIVE_API_URL}/${fileId}`, {
+        method: 'PATCH',
+        headers: this.jsonHeaders,
+        body: JSON.stringify({ name: newName }),
+      });
+      return response.ok;
+    } catch (error: any) {
+      if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') throw error;
+      console.error('Error renaming file/folder on Google Drive:', error);
+      return false;
+    }
+  }
+
   /**
    * List files in a specific folder
    */

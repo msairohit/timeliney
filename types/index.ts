@@ -1,7 +1,8 @@
 export type TagId =
   | 'personal' | 'family' | 'health' | 'education'
   | 'finance' | 'property' | 'vehicle' | 'travel'
-  | 'milestone' | 'other';
+  | 'milestone' | 'work' | 'hobby' | 'project'
+  | 'achievement' | 'social' | 'document' | 'purchase' | 'noted' | 'other';
 
 export interface LifeEvent {
   id: string;
@@ -9,10 +10,13 @@ export interface LifeEvent {
   title: string;
   description: string;
   eventDate: string;           // ISO date string YYYY-MM-DD
+  endDate?: string;            // ISO date string YYYY-MM-DD (range events only)
+  isEndDateUnknown?: boolean;  // true = ongoing / unknown end
   isDateUnknown?: boolean;
   eventTime?: string;          // HH:MM optional
   isTimeUnknown?: boolean;
   place?: string;
+  people?: string[];
   tags: TagId[];
   mediaUrls: string[];         // Cloud file IDs
   mediaNames: string[];        // Names of files on cloud
@@ -26,6 +30,10 @@ export interface LifeEvent {
   groupId?: string;            // Link multiple occurrences
   groupTitle?: string;         // Optional title for the group
   occurrenceIndex?: number;    // Index in the series
+  hasReminder?: boolean;
+  reminderDaysBefore?: number;
+  reminderTime?: string;
+  notificationId?: string;
   createdAt: string;
   updatedAt: string;
   syncStatus: 'local' | 'synced' | 'pending' | 'conflict';

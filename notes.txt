@@ -19,3 +19,4 @@ npx expo start -c
 
 (done)make sub folders based on event name and store the media so that it will be easy.
  
+ Im thinking of a seperate tags like which are not that important and dont want to clutter my timeline. ex is like others birthdays or marriage or some other events. just to keep notes kind of thing but are not important in my timeline, so is it better to just keep them in other tag?

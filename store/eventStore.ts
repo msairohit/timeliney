@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LifeEvent } from '../types';
 import { GoogleDriveService } from '../utils/googleDriveService';
 import { useAuthStore } from './authStore';
+import { cancelNotification } from '../utils/notifications';
 
 interface EventState {
   events: LifeEvent[];
@@ -12,6 +13,8 @@ interface EventState {
   updateEvent: (id: string, updatedEvent: Partial<LifeEvent>) => void;
   deleteEvent: (id: string, options?: { deleteMedia: boolean }) => Promise<void>;
   cleanupMedia: (eventTitle: string, driveIds: string[], options: { deleteMedia: boolean }) => Promise<void>;
+  renameEventFolder: (oldTitle: string, newTitle: string) => Promise<void>;
+  renameDriveFile: (fileId: string, newName: string) => Promise<void>;
   getEventById: (id: string) => LifeEvent | undefined;
   syncEvents: (userId: string) => Promise<void>;
   fetchEvents: (userId: string) => Promise<void>;
@@ -45,6 +48,11 @@ export const useEventStore = create<EventState>()(
           ...(eventToDelete.mediaUrls || []),
           ...(eventToDelete.documentUrls || [])
         ];
+
+        // Cancel notification if it exists
+        if (eventToDelete.notificationId) {
+          await cancelNotification(eventToDelete.notificationId);
+        }
 
         // 1. Immediate local state update
         set((state) => ({
@@ -113,7 +121,7 @@ export const useEventStore = create<EventState>()(
         const user = useAuthStore.getState().user;
         if (!user || !user.accessToken || driveIds.length === 0) return;
 
-        const performCleanup = async (isRetry = false) => {
+        const performCleanup = async (isRetry = false): Promise<void> => {
           try {
             const driveService = new GoogleDriveService(user.accessToken);
             let backupFolderId: string | null = null;
@@ -158,7 +166,56 @@ export const useEventStore = create<EventState>()(
           }
         };
 
-        performCleanup();
+        return performCleanup();
+      },
+      renameEventFolder: async (oldTitle, newTitle) => {
+        const user = useAuthStore.getState().user;
+        if (!user || !user.accessToken || oldTitle === newTitle) return;
+
+        const performRename = async (isRetry = false): Promise<void> => {
+          try {
+            const driveService = new GoogleDriveService(user.accessToken);
+            const rootFolderId = await driveService.getOrCreateFolder('Timeliney_Media');
+            
+            if (rootFolderId) {
+              const folderId = await driveService.findFolder(oldTitle, rootFolderId);
+              if (folderId) {
+                await driveService.renameFile(folderId, newTitle);
+                console.log(`Renamed folder from "${oldTitle}" to "${newTitle}"`);
+              }
+            }
+          } catch (error: any) {
+            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
+              await useAuthStore.getState().refreshAccessToken();
+              return performRename(true);
+            }
+            console.error('Error renaming event folder:', error);
+          }
+        };
+
+        return performRename();
+      },
+      renameDriveFile: async (fileId, newName) => {
+        const user = useAuthStore.getState().user;
+        if (!user || !user.accessToken) return;
+
+        const performRename = async (isRetry = false): Promise<void> => {
+          try {
+            const driveService = new GoogleDriveService(user.accessToken);
+            const success = await driveService.renameFile(fileId, newName);
+            if (success) {
+              console.log(`Successfully renamed file ${fileId} to "${newName}"`);
+            }
+          } catch (error: any) {
+            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
+              await useAuthStore.getState().refreshAccessToken();
+              return performRename(true);
+            }
+            console.error('Error renaming drive file:', error);
+          }
+        };
+
+        return performRename();
       },
       getEventById: (id) => get().events.find((e) => e.id === id),
       clearEvents: () => set({ events: [] }),

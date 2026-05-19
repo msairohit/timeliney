@@ -9,7 +9,15 @@ import {
   Car,
   Plane,
   Star,
-  Pin
+  Pin,
+  Briefcase,
+  Palette,
+  FolderOpen,
+  Trophy,
+  Ticket,
+  FileText,
+  ShoppingBag,
+  Bookmark
 } from 'lucide-react-native';
 
 export type TagTheme = {
@@ -123,6 +131,94 @@ export const TAG_THEMES: Record<TagId, TagTheme> = {
     badgeText: '#a21caf',
     badgeBackground: '#fae8ff',
     icon: Star,
+  },
+  work: {
+    id: 'work',
+    label: 'Work',
+    primary: '#0284c7', // light blue
+    background: '#f0f9ff',
+    cardBorder: '#e0f2fe',
+    dotColor: '#0284c7',
+    badgeText: '#0369a1',
+    badgeBackground: '#bae6fd',
+    icon: Briefcase,
+  },
+  hobby: {
+    id: 'hobby',
+    label: 'Hobby',
+    primary: '#84cc16', // Lime
+    background: '#f7fee7',
+    cardBorder: '#ecfccb',
+    dotColor: '#84cc16',
+    badgeText: '#4d7c0f',
+    badgeBackground: '#d9f99d',
+    icon: Palette,
+  },
+  project: {
+    id: 'project',
+    label: 'Project',
+    primary: '#f97316', // Orange
+    background: '#fff7ed',
+    cardBorder: '#ffedd5',
+    dotColor: '#f97316',
+    badgeText: '#c2410c',
+    badgeBackground: '#fed7aa',
+    icon: FolderOpen,
+  },
+  achievement: {
+    id: 'achievement',
+    label: 'Achievement',
+    primary: '#eab308', // Yellow
+    background: '#fefce8',
+    cardBorder: '#fef08a',
+    dotColor: '#eab308',
+    badgeText: '#a16207',
+    badgeBackground: '#fde047',
+    icon: Trophy,
+  },
+  social: {
+    id: 'social',
+    label: 'Social / Event',
+    primary: '#db2777', // Pink
+    background: '#fdf2f8',
+    cardBorder: '#fbcfe8',
+    dotColor: '#db2777',
+    badgeText: '#9d174d',
+    badgeBackground: '#f9a8d4',
+    icon: Ticket,
+  },
+  document: {
+    id: 'document',
+    label: 'Document',
+    primary: '#475569', // Slate
+    background: '#f8fafc',
+    cardBorder: '#e2e8f0',
+    dotColor: '#475569',
+    badgeText: '#1e293b',
+    badgeBackground: '#cbd5e1',
+    icon: FileText,
+  },
+  purchase: {
+    id: 'purchase',
+    label: 'Purchase',
+    primary: '#14b8a6', // Teal
+    background: '#f0fdfa',
+    cardBorder: '#ccfbf1',
+    dotColor: '#14b8a6',
+    badgeText: '#0f766e',
+    badgeBackground: '#99f6e4',
+    icon: ShoppingBag,
+  },
+  noted: {
+    id: 'noted',
+    label: 'Noted',
+    primary: '#a18072', // Warm muted brown
+    background: '#faf6f4',
+    cardBorder: '#e8ddd8',
+    dotColor: '#a18072',
+    badgeText: '#6d4c41',
+    badgeBackground: '#efebe9',
+    icon: Bookmark,
   },
   other: {
     id: 'other',
