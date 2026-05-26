@@ -138,6 +138,8 @@ export const ShareCard = React.forwardRef<View, ShareCardProps>(
   }
 );
 
+ShareCard.displayName = 'ShareCard';
+
 const s = StyleSheet.create({
   card: {
     borderRadius: 24,

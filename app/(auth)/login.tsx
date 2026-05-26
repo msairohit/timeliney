@@ -128,7 +128,7 @@ function LoginScreen() {
           style={styles.linkButton}
         >
           <Text style={styles.linkText}>
-            Don't have an account? <Text style={styles.linkTextBold}>Register</Text>
+            Don&apos;t have an account? <Text style={styles.linkTextBold}>Register</Text>
           </Text>
         </TouchableOpacity>
       </View>

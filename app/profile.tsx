@@ -4,10 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { auth } from '../constants/FirebaseConfig';
 import { signOut } from 'firebase/auth';
 import { useRouter } from 'expo-router';
-import { User, Mail, LogOut, Shield, Bell, CircleHelp as HelpCircle, ChevronRight, ArrowLeft, Download, Upload, PieChart } from 'lucide-react-native';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
-import * as DocumentPicker from 'expo-document-picker';
+import { User, Mail, LogOut, Shield, Bell, CircleHelp as HelpCircle, ChevronRight, ArrowLeft, PieChart, Cloud } from 'lucide-react-native';
 import { useEventStore } from '../store/eventStore';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,93 +38,7 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const handleExport = async () => {
-    try {
-      const events = useEventStore.getState().events;
-      const jsonStr = JSON.stringify(events, null, 2);
-      
-      const fileUri = `${FileSystem.documentDirectory}timeliney_export_${Date.now()}.json`;
-      await FileSystem.writeAsStringAsync(fileUri, jsonStr, { encoding: FileSystem.EncodingType.UTF8 });
-      
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/json',
-          dialogTitle: 'Export Timeliney Data',
-        });
-      } else {
-        Alert.alert('Error', 'Sharing is not available on this device');
-      }
-    } catch (error) {
-      console.error('Export error:', error);
-      Alert.alert('Error', 'Failed to export data');
-    }
-  };
 
-  const handleImport = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/json',
-        copyToCacheDirectory: true,
-      });
-
-      if (result.canceled || !result.assets || result.assets.length === 0) {
-        return;
-      }
-
-      const fileUri = result.assets[0].uri;
-      const jsonContent = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.UTF8 });
-      const parsedData = JSON.parse(jsonContent);
-
-      if (!Array.isArray(parsedData)) {
-        Alert.alert('Error', 'Invalid data format. Expected an array of events.');
-        return;
-      }
-
-      Alert.alert(
-        'Import Data',
-        `Found ${parsedData.length} events. Do you want to replace all current events or merge them?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Replace All', 
-            style: 'destructive',
-            onPress: async () => {
-              useEventStore.getState().clearEvents();
-              parsedData.forEach(event => useEventStore.getState().addEvent(event));
-              if (user?.uid) {
-                await useEventStore.getState().syncEvents(user.uid);
-              }
-              Alert.alert('Success', 'Data imported and replaced successfully.');
-            }
-          },
-          { 
-            text: 'Merge', 
-            onPress: async () => {
-              const currentEvents = useEventStore.getState().events;
-              const existingIds = new Set(currentEvents.map(e => e.id));
-              
-              let addedCount = 0;
-              parsedData.forEach(event => {
-                if (!existingIds.has(event.id)) {
-                  useEventStore.getState().addEvent(event);
-                  addedCount++;
-                }
-              });
-
-              if (user?.uid && addedCount > 0) {
-                await useEventStore.getState().syncEvents(user.uid);
-              }
-              Alert.alert('Success', `Imported ${addedCount} new events.`);
-            }
-          }
-        ]
-      );
-    } catch (error) {
-      console.error('Import error:', error);
-      Alert.alert('Error', 'Failed to read or parse the import file. Make sure it is a valid Timeliney JSON export.');
-    }
-  };
 
   const ProfileItem = ({ icon: Icon, label, value, onPress, destructive = false }: any) => (
     <TouchableOpacity style={styles.item} onPress={onPress} disabled={!onPress}>
@@ -182,18 +93,12 @@ export default function ProfileScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Data Management</Text>
+        <Text style={styles.sectionTitle}>Backup & Sync</Text>
         <ProfileItem 
-          icon={Download} 
-          label="Export Data" 
-          value="Save your timeline as JSON"
-          onPress={handleExport} 
-        />
-        <ProfileItem 
-          icon={Upload} 
-          label="Import Data" 
-          value="Restore from a previous backup"
-          onPress={handleImport} 
+          icon={Cloud} 
+          label="Google Drive Backup" 
+          value="Manage sync, cloud status, exports & imports"
+          onPress={() => router.push('/sync')} 
         />
       </View>
 

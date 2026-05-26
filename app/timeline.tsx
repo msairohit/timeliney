@@ -16,6 +16,7 @@ import { formatDuration, formatDateRange } from '../utils/duration';
 import CompactView from '../components/timeline/CompactView';
 import CalendarView from '../components/timeline/CalendarView';
 import YearView from '../components/timeline/YearView';
+import ReauthBanner from '../components/auth/ReauthBanner';
 
 export default function TimelineScreen() {
   const insets = useSafeAreaInsets();
@@ -313,6 +314,8 @@ export default function TimelineScreen() {
         </View>
       </Animated.View>
 
+      <ReauthBanner />
+
       {/* Timeline List */}
       {viewMode === 'compact' ? (
         <CompactView events={sortedEvents} router={router} onRefresh={onRefresh} isRefreshing={isRefreshing} insets={insets} />
@@ -329,7 +332,7 @@ export default function TimelineScreen() {
           <View style={styles.emptyState}>
             <Calendar size={64} color="#cbd5e1" strokeWidth={1.5} />
             <Text style={styles.emptyTitle}>No events yet</Text>
-            <Text style={styles.emptySubtitle}>Start documenting your life's journey by adding your first event.</Text>
+            <Text style={styles.emptySubtitle}>Start documenting your life&apos;s journey by adding your first event.</Text>
           </View>
         }
         refreshControl={

@@ -6,7 +6,7 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
-  }),
+  } as any),
 });
 
 import { LifeEvent } from '../types';

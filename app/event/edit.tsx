@@ -179,19 +179,28 @@ export default function EditEventScreen() {
         
         const docNames = event.documentNames || [];
         const localDocUris = event.localDocumentUris || [];
+        const localDocNames = event.localDocumentNames || [];
         const cloudDocUrls = event.documentUrls || [];
         
-        // Combine and deduplicate documents
-        const syncedDocs = docNames.map((name, i) => {
-          const local = localDocUris[i];
-          const cloud = cloudDocUrls[i];
-          return {
-            name,
-            uri: local || cloud || ''
-          };
+        const combinedDocs: { uri: string; name: string }[] = [];
+        
+        // Add local documents
+        localDocUris.forEach((uri, i) => {
+          combinedDocs.push({
+            uri,
+            name: localDocNames[i] || uri.split('/').pop() || `doc_${i}`
+          });
         });
-
-        setDocuments(syncedDocs);
+        
+        // Add cloud documents
+        cloudDocUrls.forEach((uri, i) => {
+          combinedDocs.push({
+            uri,
+            name: docNames[i] || uri.split('/').pop() || `doc_${i}`
+          });
+        });
+        
+        setDocuments(combinedDocs);
         setGroupId(event.groupId);
 
         // Load date range fields
@@ -305,7 +314,7 @@ export default function EditEventScreen() {
         localMediaNames: allMedia.filter(m => isLocal(m.uri)).map(m => m.name),
         mediaUrls: allMedia.filter(m => !isLocal(m.uri)).map(m => m.uri),
         mediaNames: allMedia.filter(m => !isLocal(m.uri)).map(m => m.name),
-        documentNames: documents.map(d => d.name),
+        documentNames: documents.filter(d => !isLocal(d.uri)).map(d => d.name),
         localDocumentUris: documents.filter(d => isLocal(d.uri)).map(d => d.uri),
         localDocumentNames: documents.filter(d => isLocal(d.uri)).map(d => d.name),
         documentUrls: documents.filter(d => !isLocal(d.uri)).map(d => d.uri),
@@ -401,7 +410,20 @@ export default function EditEventScreen() {
           { 
             text: 'Delete Files', 
             style: 'destructive', 
-            onPress: () => saveChanges(true) 
+            onPress: () => {
+              Alert.alert(
+                'Double Confirmation Required',
+                'Are you absolutely sure you want to permanently delete these removed files from Google Drive? This cannot be undone.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Yes, Delete Permanently',
+                    style: 'destructive',
+                    onPress: () => saveChanges(true)
+                  }
+                ]
+              );
+            } 
           },
         ]
       );
@@ -485,7 +507,7 @@ export default function EditEventScreen() {
                 display="compact"
                 onChange={(event, date) => {
                   if (date) {
-                    date.setSeconds(0, 0, 0);
+                    date.setSeconds(0, 0);
                     setEventTime(date);
                   }
                 }}
@@ -704,7 +726,7 @@ export default function EditEventScreen() {
                     display="compact"
                     onChange={(event, date) => {
                       if (date) {
-                        date.setSeconds(0, 0, 0);
+                        date.setSeconds(0, 0);
                         setReminderTime(date);
                       }
                     }}
@@ -799,7 +821,7 @@ export default function EditEventScreen() {
           onChange={(event, date) => {
             setShowTimePicker(false);
             if (event.type === 'set' && date) {
-              date.setSeconds(0, 0, 0);
+              date.setSeconds(0, 0);
               setEventTime(date);
             }
           }}
@@ -826,7 +848,7 @@ export default function EditEventScreen() {
           onChange={(event, date) => {
             setShowReminderTimePicker(false);
             if (event.type === 'set' && date) {
-              date.setSeconds(0, 0, 0);
+              date.setSeconds(0, 0);
               setReminderTime(date);
             }
           }}

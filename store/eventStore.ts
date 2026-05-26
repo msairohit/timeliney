@@ -6,9 +6,16 @@ import { GoogleDriveService } from '../utils/googleDriveService';
 import { useAuthStore } from './authStore';
 import { cancelNotification } from '../utils/notifications';
 
+interface SaveStateMetaEntry {
+  eventCount: number;
+  fileCount: number;
+}
+
 interface EventState {
   events: LifeEvent[];
   isSyncing: boolean;
+  /** Local cache of save state metadata keyed by Drive folder ID. Persisted to AsyncStorage. */
+  saveStateMetadata: Record<string, SaveStateMetaEntry>;
   addEvent: (event: LifeEvent) => void;
   updateEvent: (id: string, updatedEvent: Partial<LifeEvent>) => void;
   deleteEvent: (id: string, options?: { deleteMedia: boolean }) => Promise<void>;
@@ -16,10 +23,22 @@ interface EventState {
   renameEventFolder: (oldTitle: string, newTitle: string) => Promise<void>;
   renameDriveFile: (fileId: string, newName: string) => Promise<void>;
   getEventById: (id: string) => LifeEvent | undefined;
-  syncEvents: (userId: string) => Promise<void>;
-  fetchEvents: (userId: string) => Promise<void>;
+  syncEvents: (userId: string, isRetry?: boolean) => Promise<void>;
+  fetchEvents: (userId: string, isRetry?: boolean) => Promise<void>;
   clearEvents: () => void;
   reorderGroupEvents: (groupId: string) => void;
+  verifyAndHealEventFiles: (id: string) => Promise<void>;
+  pendingRestore: {
+    removedEvents: LifeEvent[];
+    removedFiles: { eventId: string; eventTitle: string; fileId: string; fileName: string; isDoc: boolean }[];
+  } | null;
+  restorePendingData: () => Promise<void>;
+  dismissPendingRestore: () => void;
+  backupAndDetectOverrides: (newEvents: LifeEvent[], onProgress?: (msg: string) => void) => Promise<void>;
+  listSaveStatesAction: () => Promise<{ id: string; name: string; createdTime: string; eventCount?: number; fileCount?: number }[]>;
+  createSaveStateAction: (customName?: string, onProgress?: (msg: string) => void) => Promise<void>;
+  deleteSaveStateAction: (folderId: string) => Promise<void>;
+  restoreSaveStateAction: (folderId: string, folderName: string, onProgress?: (msg: string) => void) => Promise<void>;
 }
 
 export const useEventStore = create<EventState>()(
@@ -27,6 +46,8 @@ export const useEventStore = create<EventState>()(
     (set, get) => ({
       events: [],
       isSyncing: false,
+      pendingRestore: null,
+      saveStateMetadata: {},
       addEvent: (event) => {
         const userId = useAuthStore.getState().user?.uid || 'local-user';
         set((state) => ({ 
@@ -107,9 +128,14 @@ export const useEventStore = create<EventState>()(
                 }
               }
           } catch (error: any) {
-            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
-              await useAuthStore.getState().refreshAccessToken();
-              return performDriveCleanup(true);
+            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+              if (!isRetry) {
+                const newToken = await useAuthStore.getState().refreshAccessToken();
+                if (newToken) {
+                  return performDriveCleanup(true);
+                }
+              }
+              useAuthStore.getState().setNeedsReauth(true);
             }
             console.error('Error during Drive cleanup after deletion:', error);
           }
@@ -119,11 +145,12 @@ export const useEventStore = create<EventState>()(
       },
       cleanupMedia: async (eventTitle, driveIds, options) => {
         const user = useAuthStore.getState().user;
-        if (!user || !user.accessToken || driveIds.length === 0) return;
+        const accessToken = user?.accessToken;
+        if (!accessToken || driveIds.length === 0) return;
 
         const performCleanup = async (isRetry = false): Promise<void> => {
           try {
-            const driveService = new GoogleDriveService(user.accessToken);
+            const driveService = new GoogleDriveService(accessToken);
             let backupFolderId: string | null = null;
             const rootFolderId = await driveService.getOrCreateFolder('Timeliney_Media');
             const eventFolderId = await driveService.getOrCreateFolder(eventTitle, rootFolderId || undefined);
@@ -158,9 +185,14 @@ export const useEventStore = create<EventState>()(
               }
             }
           } catch (error: any) {
-            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
-              await useAuthStore.getState().refreshAccessToken();
-              return performCleanup(true);
+            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+              if (!isRetry) {
+                const newToken = await useAuthStore.getState().refreshAccessToken();
+                if (newToken) {
+                  return performCleanup(true);
+                }
+              }
+              useAuthStore.getState().setNeedsReauth(true);
             }
             console.error('Error during individual media cleanup:', error);
           }
@@ -170,11 +202,12 @@ export const useEventStore = create<EventState>()(
       },
       renameEventFolder: async (oldTitle, newTitle) => {
         const user = useAuthStore.getState().user;
-        if (!user || !user.accessToken || oldTitle === newTitle) return;
+        const accessToken = user?.accessToken;
+        if (!accessToken || oldTitle === newTitle) return;
 
         const performRename = async (isRetry = false): Promise<void> => {
           try {
-            const driveService = new GoogleDriveService(user.accessToken);
+            const driveService = new GoogleDriveService(accessToken);
             const rootFolderId = await driveService.getOrCreateFolder('Timeliney_Media');
             
             if (rootFolderId) {
@@ -185,9 +218,14 @@ export const useEventStore = create<EventState>()(
               }
             }
           } catch (error: any) {
-            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
-              await useAuthStore.getState().refreshAccessToken();
-              return performRename(true);
+            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+              if (!isRetry) {
+                const newToken = await useAuthStore.getState().refreshAccessToken();
+                if (newToken) {
+                  return performRename(true);
+                }
+              }
+              useAuthStore.getState().setNeedsReauth(true);
             }
             console.error('Error renaming event folder:', error);
           }
@@ -197,25 +235,128 @@ export const useEventStore = create<EventState>()(
       },
       renameDriveFile: async (fileId, newName) => {
         const user = useAuthStore.getState().user;
-        if (!user || !user.accessToken) return;
+        const accessToken = user?.accessToken;
+        if (!accessToken) return;
 
         const performRename = async (isRetry = false): Promise<void> => {
           try {
-            const driveService = new GoogleDriveService(user.accessToken);
+            const driveService = new GoogleDriveService(accessToken);
             const success = await driveService.renameFile(fileId, newName);
             if (success) {
               console.log(`Successfully renamed file ${fileId} to "${newName}"`);
             }
           } catch (error: any) {
-            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
-              await useAuthStore.getState().refreshAccessToken();
-              return performRename(true);
+            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+              if (!isRetry) {
+                const newToken = await useAuthStore.getState().refreshAccessToken();
+                if (newToken) {
+                  return performRename(true);
+                }
+              }
+              useAuthStore.getState().setNeedsReauth(true);
             }
             console.error('Error renaming drive file:', error);
           }
         };
 
         return performRename();
+      },
+      verifyAndHealEventFiles: async (id) => {
+        const user = useAuthStore.getState().user;
+        const accessToken = user?.accessToken;
+        if (!accessToken) return;
+
+        const event = get().events.find((e) => e.id === id);
+        if (!event) return;
+
+        const hasCloudFiles = 
+          (event.mediaUrls && event.mediaUrls.length > 0) || 
+          (event.documentUrls && event.documentUrls.length > 0);
+        if (!hasCloudFiles) return;
+
+        const performHealing = async (isRetry = false): Promise<void> => {
+          try {
+            const driveService = new GoogleDriveService(accessToken);
+            const rootFolderId = await driveService.getOrCreateFolder('Timeliney_Media');
+            if (!rootFolderId) return;
+
+            const eventFolderId = await driveService.findFolder(event.title, rootFolderId);
+            if (!eventFolderId) return;
+
+            // List all files in the event's subfolder on Google Drive
+            const driveFiles = await driveService.listFilesAndNamesInFolder(eventFolderId);
+            
+            let mediaUrls = [...(event.mediaUrls || [])];
+            let documentUrls = [...(event.documentUrls || [])];
+            let updated = false;
+
+            // 1. Verify and heal mediaUrls
+            for (let i = 0; i < mediaUrls.length; i++) {
+              const fileId = mediaUrls[i];
+              const existsInFolder = driveFiles.some(f => f.id === fileId);
+              if (!existsInFolder) {
+                const fileName = event.mediaNames?.[i];
+                if (fileName) {
+                  const match = driveFiles.find(f => f.name === fileName);
+                  if (match) {
+                    console.log(`Healed missing media reference in event "${event.title}": ${fileId} -> ${match.id}`);
+                    mediaUrls[i] = match.id;
+                    updated = true;
+                  }
+                }
+              }
+            }
+
+            // 2. Verify and heal documentUrls
+            for (let i = 0; i < documentUrls.length; i++) {
+              const fileId = documentUrls[i];
+              const existsInFolder = driveFiles.some(f => f.id === fileId);
+              if (!existsInFolder) {
+                const fileName = event.documentNames?.[i];
+                if (fileName) {
+                  const match = driveFiles.find(f => f.name === fileName);
+                  if (match) {
+                    console.log(`Healed missing doc reference in event "${event.title}": ${fileId} -> ${match.id}`);
+                    documentUrls[i] = match.id;
+                    updated = true;
+                  }
+                }
+              }
+            }
+
+            if (updated) {
+              set((state) => ({
+                events: state.events.map((e) =>
+                  e.id === id
+                    ? {
+                        ...e,
+                        mediaUrls,
+                        documentUrls,
+                        syncStatus: 'pending',
+                        updatedAt: new Date().toISOString(),
+                      }
+                    : e
+                ),
+              }));
+
+              // Sync the updated events to Drive
+              await get().syncEvents(user.uid);
+            }
+          } catch (error: any) {
+            if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+              if (!isRetry) {
+                const newToken = await useAuthStore.getState().refreshAccessToken();
+                if (newToken) {
+                  return performHealing(true);
+                }
+              }
+              useAuthStore.getState().setNeedsReauth(true);
+            }
+            console.error('Error during verifyAndHealEventFiles:', error);
+          }
+        };
+
+        return performHealing();
       },
       getEventById: (id) => get().events.find((e) => e.id === id),
       clearEvents: () => set({ events: [] }),
@@ -226,17 +367,18 @@ export const useEventStore = create<EventState>()(
         set({ isSyncing: true });
         try {
           const user = useAuthStore.getState().user;
-          if (!user || !user.accessToken) {
+          const accessToken = user?.accessToken;
+          if (!accessToken) {
             console.log("Sync skipped: No valid user or accessToken");
-            return;
+            throw new Error("No Google Drive access token. Please log in again.");
           }
 
-          const driveService = new GoogleDriveService(user.accessToken);
+          const driveService = new GoogleDriveService(accessToken);
           const { events } = get();
           
           // Find events that need media upload
           const pendingEvents = events.filter(e => 
-            e.localMediaUris?.length > 0 || e.localDocumentUris?.length > 0
+            e.localMediaUris && e.localMediaUris.length > 0 || e.localDocumentUris && e.localDocumentUris.length > 0
           );
 
           let updatedEvents = [...events];
@@ -316,14 +458,21 @@ export const useEventStore = create<EventState>()(
             }));
           } else {
             console.error("Sync to Google Drive failed.");
+            throw new Error("Failed to save timeline data to Google Drive. Please verify your permissions.");
           }
         } catch (error: any) {
-          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
-            console.log('Unauthorized, refreshing token and retrying sync...');
-            await useAuthStore.getState().refreshAccessToken();
-            return get().syncEvents(userId, true);
+          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+            if (!isRetry) {
+              console.log('Unauthorized, refreshing token and retrying sync...');
+              const newToken = await useAuthStore.getState().refreshAccessToken();
+              if (newToken) {
+                return get().syncEvents(userId, true);
+              }
+            }
+            useAuthStore.getState().setNeedsReauth(true);
           }
           console.error('Error during syncEvents:', error);
+          throw error;
         } finally {
           set({ isSyncing: false });
         }
@@ -335,9 +484,10 @@ export const useEventStore = create<EventState>()(
         set({ isSyncing: true });
         try {
           const user = useAuthStore.getState().user;
-          if (!user || !user.accessToken) return;
+          const accessToken = user?.accessToken;
+          if (!accessToken) return;
 
-          const driveService = new GoogleDriveService(user.accessToken);
+          const driveService = new GoogleDriveService(accessToken);
           const remoteEvents = await driveService.fetchAppData();
 
           if (remoteEvents) {
@@ -361,10 +511,15 @@ export const useEventStore = create<EventState>()(
             set({ events: mergedEvents });
           }
         } catch (error: any) {
-          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED' && !isRetry) {
-            console.log('Unauthorized, refreshing token and retrying fetch...');
-            await useAuthStore.getState().refreshAccessToken();
-            return get().fetchEvents(userId, true);
+          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+            if (!isRetry) {
+              console.log('Unauthorized, refreshing token and retrying fetch...');
+              const newToken = await useAuthStore.getState().refreshAccessToken();
+              if (newToken) {
+                return get().fetchEvents(userId, true);
+              }
+            }
+            useAuthStore.getState().setNeedsReauth(true);
           }
           console.error('Error during fetchEvents:', error);
         } finally {
@@ -401,7 +556,7 @@ export const useEventStore = create<EventState>()(
             if (e.groupId === groupId) {
               const newIndex = sorted.findIndex(se => se.id === e.id) + 1;
               if (e.occurrenceIndex !== newIndex) {
-                return { ...e, occurrenceIndex: newIndex, syncStatus: 'pending', updatedAt: new Date().toISOString() };
+                return { ...e, occurrenceIndex: newIndex, syncStatus: 'pending' as const, updatedAt: new Date().toISOString() };
               }
             }
             return e;
@@ -409,6 +564,261 @@ export const useEventStore = create<EventState>()(
 
           return { events: updatedEvents };
         });
+      },
+
+      dismissPendingRestore: () => {
+        set({ pendingRestore: null });
+      },
+
+      restorePendingData: async () => {
+        const { pendingRestore, events } = get();
+        if (!pendingRestore) return;
+
+        let updatedEvents = [...events];
+
+        // 1. Restore removed events
+        pendingRestore.removedEvents.forEach(oldEv => {
+          if (!updatedEvents.some(e => e.id === oldEv.id)) {
+            updatedEvents.push({
+              ...oldEv,
+              syncStatus: 'local',
+              updatedAt: new Date().toISOString()
+            });
+          }
+        });
+
+        // 2. Restore removed files to existing events
+        pendingRestore.removedFiles.forEach(file => {
+          const idx = updatedEvents.findIndex(e => e.id === file.eventId);
+          if (idx !== -1) {
+            const ev = updatedEvents[idx];
+            if (file.isDoc) {
+              const docUrls = [...(ev.documentUrls || [])];
+              const docNames = [...(ev.documentNames || [])];
+              if (!docUrls.includes(file.fileId)) {
+                docUrls.push(file.fileId);
+                docNames.push(file.fileName);
+                updatedEvents[idx] = {
+                  ...ev,
+                  documentUrls: docUrls,
+                  documentNames: docNames,
+                  syncStatus: 'local',
+                  updatedAt: new Date().toISOString()
+                };
+              }
+            } else {
+              const mediaUrls = [...(ev.mediaUrls || [])];
+              const mediaNames = [...(ev.mediaNames || [])];
+              if (!mediaUrls.includes(file.fileId)) {
+                mediaUrls.push(file.fileId);
+                mediaNames.push(file.fileName);
+                updatedEvents[idx] = {
+                  ...ev,
+                  mediaUrls: mediaUrls,
+                  mediaNames: mediaNames,
+                  syncStatus: 'local',
+                  updatedAt: new Date().toISOString()
+                };
+              }
+            }
+          }
+        });
+
+        set({ events: updatedEvents, pendingRestore: null });
+
+        // Trigger sync to upload/save changes back to Drive
+        const user = useAuthStore.getState().user;
+        if (user && user.uid) {
+          await get().syncEvents(user.uid);
+        }
+      },
+
+      backupAndDetectOverrides: async (newEvents, onProgress) => {
+        const user = useAuthStore.getState().user;
+        const oldEvents = get().events;
+
+        // 1. Create a safety backup in Google Drive if connected
+        if (user && user.accessToken) {
+          if (onProgress) onProgress('Creating safety backup in Google Drive...');
+          try {
+            const driveService = new GoogleDriveService(user.accessToken);
+            await driveService.backupEntireMediaFolder();
+          } catch (err) {
+            console.error('Safety backup failed:', err);
+          }
+        }
+
+        // 2. Identify removed events (events in oldEvents that are not in newEvents)
+        const newEventIds = new Set(newEvents.map(e => e.id));
+        const removedEvents = oldEvents.filter(e => !newEventIds.has(e.id));
+
+        // 3. Identify removed files for events that exist in both
+        const removedFiles: { eventId: string; eventTitle: string; fileId: string; fileName: string; isDoc: boolean }[] = [];
+        
+        oldEvents.forEach(oldEv => {
+          const newEv = newEvents.find(e => e.id === oldEv.id);
+          if (newEv) {
+            // Check media
+            const newMediaUrls = new Set(newEv.mediaUrls || []);
+            (oldEv.mediaUrls || []).forEach((fileId, i) => {
+              if (!newMediaUrls.has(fileId)) {
+                removedFiles.push({
+                  eventId: oldEv.id,
+                  eventTitle: oldEv.title,
+                  fileId,
+                  fileName: oldEv.mediaNames?.[i] || `image_${i}.jpg`,
+                  isDoc: false
+                });
+              }
+            });
+
+            // Check documents
+            const newDocUrls = new Set(newEv.documentUrls || []);
+            (oldEv.documentUrls || []).forEach((fileId, i) => {
+              if (!newDocUrls.has(fileId)) {
+                removedFiles.push({
+                  eventId: oldEv.id,
+                  eventTitle: oldEv.title,
+                  fileId,
+                  fileName: oldEv.documentNames?.[i] || `doc_${i}`,
+                  isDoc: true
+                });
+              }
+            });
+          }
+        });
+
+        // 4. Update the state with newEvents
+        set({ events: newEvents });
+
+        // 5. If there are removals, save them to pendingRestore
+        if (removedEvents.length > 0 || removedFiles.length > 0) {
+          set({ pendingRestore: { removedEvents, removedFiles } });
+        } else {
+          set({ pendingRestore: null });
+        }
+      },
+      listSaveStatesAction: async () => {
+        const user = useAuthStore.getState().user;
+        const accessToken = user?.accessToken;
+        if (!accessToken) return [];
+        try {
+          const driveService = new GoogleDriveService(accessToken);
+          const raw = await driveService.listSaveStates();
+          // Merge locally-cached metadata (eventCount / fileCount) into each entry
+          const metadata = get().saveStateMetadata;
+          return raw.map(s => ({
+            ...s,
+            eventCount: metadata[s.id]?.eventCount,
+            fileCount: metadata[s.id]?.fileCount,
+          }));
+        } catch (error: any) {
+          console.error('listSaveStatesAction error:', error);
+          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+            useAuthStore.getState().setNeedsReauth(true);
+          }
+          return [];
+        }
+      },
+      createSaveStateAction: async (customName, onProgress) => {
+        const user = useAuthStore.getState().user;
+        const accessToken = user?.accessToken;
+        if (!accessToken) throw new Error('Not logged in to Google Drive');
+        try {
+          set({ isSyncing: true });
+          const driveService = new GoogleDriveService(accessToken);
+          
+          if (onProgress) onProgress('Syncing local changes to Drive...');
+          await get().syncEvents(user.uid);
+
+          const currentEvents = get().events;
+
+          // Compute counts from local data — no extra network calls needed
+          const eventCount = currentEvents.length;
+          const fileCount = currentEvents.reduce((sum, e) =>
+            sum +
+            (e.mediaUrls?.length ?? 0) +
+            (e.documentUrls?.length ?? 0) +
+            (e.localMediaUris?.length ?? 0) +
+            (e.localDocumentUris?.length ?? 0),
+          0);
+
+          const result = await driveService.createSaveState(currentEvents, customName, onProgress);
+          if (result) {
+            // Persist metadata keyed by Drive folder ID
+            const newMeta = { ...get().saveStateMetadata };
+
+            // Clean up any IDs that Drive enforced deletion on (3-state limit)
+            for (const deletedId of result.deletedIds) {
+              delete newMeta[deletedId];
+            }
+
+            newMeta[result.folderId] = { eventCount, fileCount };
+            set({ saveStateMetadata: newMeta });
+          }
+        } catch (error: any) {
+          console.error('createSaveStateAction error:', error);
+          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+            useAuthStore.getState().setNeedsReauth(true);
+          }
+          throw error;
+        } finally {
+          set({ isSyncing: false });
+        }
+      },
+      deleteSaveStateAction: async (folderId) => {
+        const user = useAuthStore.getState().user;
+        const accessToken = user?.accessToken;
+        if (!accessToken) throw new Error('Not logged in to Google Drive');
+        try {
+          set({ isSyncing: true });
+          const driveService = new GoogleDriveService(accessToken);
+          await driveService.deleteFolderRecursively(folderId);
+          // Remove from local metadata cache
+          const newMeta = { ...get().saveStateMetadata };
+          delete newMeta[folderId];
+          set({ saveStateMetadata: newMeta });
+        } catch (error: any) {
+          console.error('deleteSaveStateAction error:', error);
+          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+            useAuthStore.getState().setNeedsReauth(true);
+          }
+          throw error;
+        } finally {
+          set({ isSyncing: false });
+        }
+      },
+      restoreSaveStateAction: async (folderId, folderName, onProgress) => {
+        const user = useAuthStore.getState().user;
+        const accessToken = user?.accessToken;
+        if (!accessToken) throw new Error('Not logged in to Google Drive');
+        try {
+          set({ isSyncing: true });
+          const driveService = new GoogleDriveService(accessToken);
+          
+          const restoredEvents = await driveService.restoreSaveState(folderId, onProgress);
+          if (!restoredEvents) {
+            throw new Error('Failed to restore save state.');
+          }
+
+          if (onProgress) onProgress('Creating safety backup of current timeline before replace...');
+          await get().backupAndDetectOverrides(restoredEvents, onProgress);
+
+          if (onProgress) onProgress('Saving restored timeline to Google Drive...');
+          await driveService.saveAppData(get().events);
+          
+          set((state) => ({
+            events: state.events.map(e => ({ ...e, syncStatus: 'synced' }))
+          }));
+        } catch (error: any) {
+          console.error('restoreSaveStateAction error:', error);
+          if (error.message === 'GOOGLE_DRIVE_UNAUTHORIZED') {
+            useAuthStore.getState().setNeedsReauth(true);
+          }
+          throw error;
+        } finally {
+          set({ isSyncing: false });
+        }
       }
     }),
     {

@@ -35,7 +35,27 @@ export default function RootLayout() {
         useEventStore.getState().clearEvents();
       }
       
-      useEventStore.getState().fetchEvents(user.uid);
+      // Background auto-sync check on startup
+      const runStartSync = async () => {
+        try {
+          // Reset any stale reauth status from a previous session
+          useAuthStore.getState().setNeedsReauth(false);
+
+          // 1. Fetch remote events (pull changes)
+          await useEventStore.getState().fetchEvents(user.uid);
+
+          // 2. Push local events if any are unsynced
+          const eventsToCheck = useEventStore.getState().events;
+          const hasUnsynced = eventsToCheck.some(e => e.syncStatus !== 'synced');
+          if (hasUnsynced) {
+            await useEventStore.getState().syncEvents(user.uid);
+          }
+        } catch (error) {
+          console.error('Start auto-sync failed:', error);
+        }
+      };
+
+      runStartSync();
     }
     
     // Once we have the user state (either logged in or null), we can hide the splash screen
@@ -93,6 +113,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="timeline" />
         <Stack.Screen name="profile" />
+        <Stack.Screen name="sync" />
         <Stack.Screen name="statistics" />
         <Stack.Screen name="event/new" options={{ presentation: 'modal' }} />
         <Stack.Screen name="event/[id]" />

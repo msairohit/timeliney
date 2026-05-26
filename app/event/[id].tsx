@@ -52,6 +52,7 @@ export default function EventDetailScreen() {
   const allEvents = useEventStore((state) => state.events);
   const event = useEventStore((state) => state.getEventById(id as string));
   const deleteEvent = useEventStore((state) => state.deleteEvent);
+  const verifyAndHealEventFiles = useEventStore((state) => state.verifyAndHealEventFiles);
   const [selectedImage, setSelectedImage] = React.useState<string | null>(null);
   const [showShareModal, setShowShareModal] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
@@ -112,6 +113,13 @@ export default function EventDetailScreen() {
     }
   }, [event]);
 
+  // Self-heal any broken Google Drive file references
+  React.useEffect(() => {
+    if (event?.id) {
+      verifyAndHealEventFiles(event.id);
+    }
+  }, [event?.id, verifyAndHealEventFiles]);
+
   // Pre-cache event image for the share card
   React.useEffect(() => {
     const loadCardImage = async () => {
@@ -158,8 +166,21 @@ export default function EventDetailScreen() {
             text: 'Delete Media', 
             style: 'destructive', 
             onPress: () => {
-              deleteEvent(event.id, { deleteMedia: true });
-              router.back();
+              Alert.alert(
+                'Double Confirmation Required',
+                'Are you absolutely sure you want to permanently delete all media files associated with this event from Google Drive? This cannot be undone.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Yes, Delete Permanently',
+                    style: 'destructive',
+                    onPress: () => {
+                      deleteEvent(event.id, { deleteMedia: true });
+                      router.back();
+                    }
+                  }
+                ]
+              );
             } 
           },
         ]
@@ -606,22 +627,37 @@ export default function EventDetailScreen() {
             <Animated.View entering={FadeInDown.duration(600).delay(700)} style={styles.section}>
               <Text style={styles.sectionTitle}>Documents</Text>
               <View style={styles.docsList}>
-                {event.documentNames.map((name, index) => {
-                  const uri = (event.localDocumentUris && event.localDocumentUris[index]) || (event.documentUrls && event.documentUrls[index]);
-                  return (
+                {(() => {
+                  const localDocs = (event.localDocumentUris || []).map((uri, i) => ({
+                    uri,
+                    name: event.localDocumentNames?.[i] || uri.split('/').pop() || 'document'
+                  }));
+                  const cloudDocs = (event.documentUrls || []).map((uri, i) => ({
+                    uri,
+                    name: event.documentNames?.[i] || uri.split('/').pop() || 'document'
+                  }));
+                  
+                  const allDocs = [...localDocs];
+                  cloudDocs.forEach(cd => {
+                    if (!allDocs.some(ad => ad.uri === cd.uri)) {
+                      allDocs.push(cd);
+                    }
+                  });
+
+                  return allDocs.map((item, index) => (
                     <Pressable 
-                      key={name + index} 
+                      key={item.uri + index} 
                       style={[styles.docItem, { borderColor: primaryTag.cardBorder }]}
-                      onPress={() => uri && handleOpenDocument(uri, name)}
+                      onPress={() => item.uri && handleOpenDocument(item.uri, item.name)}
                     >
                       <View style={[styles.docIconWrapper, { backgroundColor: primaryTag.badgeBackground }]}>
                         <FileText size={20} color={primaryTag.primary} />
                       </View>
-                      <Text style={styles.docName} numberOfLines={1}>{name}</Text>
+                      <Text style={styles.docName} numberOfLines={1}>{item.name}</Text>
                       <ExternalLink size={16} color="#94a3b8" />
                     </Pressable>
-                  );
-                })}
+                  ));
+                })()}
               </View>
             </Animated.View>
           )}

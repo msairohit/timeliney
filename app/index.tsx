@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Platform, Dimensions, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Platform, Dimensions, ActivityIndicator, Image, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Plus, Calendar, Clock, Image as ImageIcon, MapPin, TrendingUp, Heart, Star, Layout, User as UserIcon, History, Bell, CalendarClock } from 'lucide-react-native';
@@ -9,6 +9,7 @@ import Animated, { FadeInDown, FadeInRight, FadeInLeft } from 'react-native-rean
 import { LinearGradient } from 'expo-linear-gradient';
 import DriveImage from '../components/ui/DriveImage';
 import { LifeEvent } from '../types';
+import ReauthBanner from '../components/auth/ReauthBanner';
 
 const { width } = Dimensions.get('window');
 
@@ -17,6 +18,9 @@ export default function HomeScreen() {
   const router = useRouter();
   const events = useEventStore((state) => state.events);
   const isSyncing = useEventStore((state) => state.isSyncing);
+  const pendingRestore = useEventStore((state) => state.pendingRestore);
+  const restorePendingData = useEventStore((state) => state.restorePendingData);
+  const dismissPendingRestore = useEventStore((state) => state.dismissPendingRestore);
   const user = useAuthStore((state) => state.user);
 
   const recentEvents = [...events]
@@ -233,6 +237,63 @@ export default function HomeScreen() {
       </LinearGradient>
 
       <View style={styles.content}>
+        <ReauthBanner />
+        
+        {pendingRestore && (
+          <Animated.View 
+            entering={FadeInDown.duration(600)}
+            style={styles.restoreBanner}
+          >
+            <View style={styles.restoreHeader}>
+              <History size={20} color="#e11d48" />
+              <Text style={styles.restoreTitle}>Data Override Detected</Text>
+            </View>
+            <Text style={styles.restoreDesc}>
+              An import or sync override removed some items from your active database.
+              {'\n'}• {pendingRestore.removedEvents.length} events removed
+              {'\n'}• {pendingRestore.removedFiles.length} media files/documents removed
+            </Text>
+            <View style={styles.restoreButtons}>
+              <Pressable 
+                style={[styles.restoreBtn, styles.restoreBtnPrimary]} 
+                onPress={async () => {
+                  Alert.alert(
+                    'Restore Removed Items',
+                    'Would you like to restore all these removed events and files back into your timeline?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { 
+                        text: 'Yes, Restore Everything', 
+                        onPress: async () => {
+                          await restorePendingData();
+                          Alert.alert('Restored', 'All items have been recovered and synced.');
+                        } 
+                      }
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.restoreBtnTextPrimary}>Bring Back Items</Text>
+              </Pressable>
+              <Pressable 
+                style={[styles.restoreBtn, styles.restoreBtnSecondary]} 
+                onPress={() => {
+                  Alert.alert(
+                    'Dismiss Backup',
+                    'Are you sure you want to dismiss this restore point? This will permanently accept the deletions in your active database.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Dismiss', style: 'destructive', onPress: dismissPendingRestore }
+                    ]
+                  );
+                }}
+              >
+                <Text style={styles.restoreBtnTextSecondary}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        )}
+
         {/* Insights Section */}
         {insights.length > 0 && (
           <View style={styles.section}>
@@ -754,5 +815,64 @@ const styles = StyleSheet.create({
     width: 1,
     height: 30,
     backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  restoreBanner: {
+    backgroundColor: '#fff1f2',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 24,
+    shadowColor: '#f43f5e',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  restoreHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  restoreTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#9f1239',
+  },
+  restoreDesc: {
+    fontSize: 13,
+    color: '#e11d48',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  restoreButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  restoreBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restoreBtnPrimary: {
+    backgroundColor: '#e11d48',
+  },
+  restoreBtnSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#fda4af',
+  },
+  restoreBtnTextPrimary: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  restoreBtnTextSecondary: {
+    color: '#e11d48',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

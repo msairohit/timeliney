@@ -37,7 +37,7 @@ export default function CreateEventScreen() {
   const [eventDate, setEventDate] = useState(new Date());
   const [eventTime, setEventTime] = useState(() => {
     const d = new Date();
-    d.setSeconds(0, 0, 0);
+    d.setSeconds(0, 0);
     return d;
   });
 
@@ -137,7 +137,7 @@ export default function CreateEventScreen() {
       localMediaUris: allMedia.filter(m => isLocal(m.uri)).map(m => m.uri),
       localMediaNames: allMedia.filter(m => isLocal(m.uri)).map(m => m.name),
       documentUrls: documents.filter(d => !isLocal(d.uri)).map(d => d.uri),
-      documentNames: documents.map(d => d.name),
+      documentNames: documents.filter(d => !isLocal(d.uri)).map(d => d.name),
       localDocumentUris: documents.filter(d => isLocal(d.uri)).map(d => d.uri),
       localDocumentNames: documents.filter(d => isLocal(d.uri)).map(d => d.name),
       customFields: {},
@@ -225,17 +225,6 @@ export default function CreateEventScreen() {
       })();
       return;
     }
-
-    // Trigger sync and reorder if needed
-    if (finalGroupId) {
-      useEventStore.getState().reorderGroupEvents(finalGroupId);
-    }
-
-    if (user && user.uid) {
-      useEventStore.getState().syncEvents(user.uid);
-    }
-
-    router.back();
   };
 
   const addAdditionalDate = () => {
@@ -325,7 +314,7 @@ export default function CreateEventScreen() {
                 display="compact"
                 onChange={(event, date) => {
                   if (date) {
-                    date.setSeconds(0, 0, 0);
+                    date.setSeconds(0, 0);
                     setEventTime(date);
                   }
                 }}
@@ -544,7 +533,7 @@ export default function CreateEventScreen() {
                     display="compact"
                     onChange={(event, date) => {
                       if (date) {
-                        date.setSeconds(0, 0, 0);
+                        date.setSeconds(0, 0);
                         setReminderTime(date);
                       }
                     }}
@@ -641,7 +630,7 @@ export default function CreateEventScreen() {
           onChange={(event, date) => {
             setShowTimePicker(false);
             if (event.type === 'set' && date) {
-              date.setSeconds(0, 0, 0);
+              date.setSeconds(0, 0);
               setEventTime(date);
             }
           }}
@@ -668,7 +657,7 @@ export default function CreateEventScreen() {
           onChange={(event, date) => {
             setShowReminderTimePicker(false);
             if (event.type === 'set' && date) {
-              date.setSeconds(0, 0, 0);
+              date.setSeconds(0, 0);
               setReminderTime(date);
             }
           }}
